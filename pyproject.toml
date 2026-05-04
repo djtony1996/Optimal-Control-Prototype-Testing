@@ -8,6 +8,7 @@ dependencies = []
 
 [project.scripts]
 optimal-control-item4-acados = "optimal_control_prototype_testing.acados_cpu:main"
+optimal-control-item5-crocoddyl = "optimal_control_prototype_testing.crocoddyl_cpu:main"
 
 [build-system]
 requires = ["hatchling"]
