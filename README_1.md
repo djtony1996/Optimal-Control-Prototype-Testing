@@ -54,12 +54,16 @@ The current item 1 implementation does **not** yet include:
 
 - direct collocation
 - a Colab notebook wrapper
-- verified GPU execution on a cloud runtime
 
 The current code is now written to run in either:
 
 - `float32` mode by default, which is the safer starting point for Colab GPU
 - optional `float64` mode by setting `ITEM1_ENABLE_X64=1` before launch
+
+The current multiple-shooting prototype has been verified on:
+
+- local CPU
+- Google Colab GPU for the trivial LQR case
 
 ## Code Layout
 
@@ -91,29 +95,57 @@ In the current local environment, item 1 runs on CPU with:
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item1_jax.run_item1
 ```
 
-For a future Colab GPU run, the intended pattern is:
-
-```bash
-git clone <your-repo-url>
-cd Optimal-Control-Prototype-Testing
-pip install jax jaxlib diffrax numpy
-PYTHONPATH=src python -m optimal_control_prototype_testing.item1_jax.run_item1
-```
-
-In Colab, the expected workflow is:
-
-1. Open a new notebook and switch the runtime to `GPU`.
-2. Clone this repository in a notebook cell.
-3. Install `jax`, `jaxlib`, `diffrax`, and `numpy`.
-4. Run the item 1 module from the notebook shell.
-5. Check the printed `backend` and `devices` lines. A successful GPU run should
-   report a GPU backend instead of `cpu`.
-
 If you want to force the current higher-precision local mode, use:
 
 ```bash
 ITEM1_ENABLE_X64=1 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item1_jax.run_item1
 ```
+
+## Google Colab
+
+To run item 1 on GPU in Google Colab:
+
+1. Open a new notebook in Google Colab.
+2. Change the runtime to `GPU`.
+3. Make the repository available in the notebook, for example by cloning a
+   public repository URL or uploading a zip if the repository is private.
+4. Install the dependencies.
+5. Verify that `JAX` sees the GPU.
+6. Run the item 1 module.
+
+Example notebook cells:
+
+```python
+!git clone <your-repo-url>
+%cd Optimal-Control-Prototype-Testing
+```
+
+```python
+!pip install -U "jax[cuda12]" diffrax numpy
+```
+
+```python
+import jax
+print(jax.__version__)
+print(jax.default_backend())
+print(jax.devices())
+```
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item1_jax.run_item1
+```
+
+Expected signs of a successful GPU run:
+
+- `backend: gpu`
+- `devices: ('cuda:0',)` or another CUDA device
+- `converged: True`
+
+If Colab reports a JAX or CUDA plugin version mismatch, reinstall `JAX` and
+restart the runtime before rerunning the cells above.
+
+If the repository is private, clone with a token or upload a zip archive
+instead of using a public `git clone` command.
 
 ## Current Output
 
@@ -132,10 +164,3 @@ The current runner prints:
 - `diffrax_vs_exact_step_error`
 - full `state_trajectory`
 - full `control_trajectory`
-
-## GPU Note
-
-The item 1 design is intended for GPU execution, but this Mac currently runs
-the JAX backend on CPU. A cloud runtime such as Google Colab is the most likely
-path for actual GPU validation later. The code now defaults to `float32`, which
-is a better starting point for Colab GPU than forcing `float64`.
