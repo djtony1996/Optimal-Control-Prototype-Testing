@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from dataclasses import dataclass
 
 import numpy as np
 
+from optimal_control_prototype_testing.nonlinear_pendulum import build_nonlinear_pendulum_problem
+
 
 @dataclass(frozen=True)
 class AcadosBaselineResult:
+    problem_name: str
+    constraint_mode: str
     status: int
     sqp_iterations: int | None
     objective_value: float | None
     max_control_violation: float
+    max_state_violation: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
 
@@ -36,19 +42,23 @@ def _ensure_acados_python_interface_on_path() -> None:
     acados_root = os.environ.get("ACADOS_SOURCE_DIR")
     if not acados_root:
         return
-
     python_interface_root = os.path.join(acados_root, "interfaces", "acados_template")
     if python_interface_root not in sys.path:
         sys.path.append(python_interface_root)
 
 
-def build_trivial_lqr_ocp():
+def _imports():
     _ensure_acados_python_interface_on_path()
     try:
         import casadi as ca
-        from acados_template import AcadosModel, AcadosOcp
-    except Exception as exc:  # pragma: no cover - depends on local install
+        from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
+    except Exception as exc:  # pragma: no cover
         raise RuntimeError(_missing_dependency_message(exc)) from exc
+    return ca, AcadosModel, AcadosOcp, AcadosOcpSolver
+
+
+def build_trivial_lqr_ocp():
+    ca, AcadosModel, AcadosOcp, _ = _imports()
 
     nx = 2
     nu = 1
@@ -74,7 +84,7 @@ def build_trivial_lqr_ocp():
 
     ocp = AcadosOcp()
     ocp.model = model
-    ocp.code_gen_opts.code_export_directory = "/tmp/acados_item4_generated_code"
+    ocp.code_gen_opts.code_export_directory = "/tmp/acados_item4_generated_code_trivial"
     ocp.code_gen_opts.json_file = "/tmp/trivial_lqr_acados_ocp.json"
 
     ocp.solver_options.N_horizon = horizon
@@ -82,12 +92,7 @@ def build_trivial_lqr_ocp():
 
     ocp.cost.cost_type = "LINEAR_LS"
     ocp.cost.cost_type_e = "LINEAR_LS"
-    ocp.cost.W = np.block(
-        [
-            [Q, np.zeros((nx, nu))],
-            [np.zeros((nu, nx)), R],
-        ]
-    )
+    ocp.cost.W = np.block([[Q, np.zeros((nx, nu))], [np.zeros((nu, nx)), R]])
     ocp.cost.W_e = Qf
     ocp.cost.Vx = np.vstack([np.eye(nx), np.zeros((nu, nx))])
     ocp.cost.Vu = np.vstack([np.zeros((nx, nu)), np.eye(nu)])
@@ -109,23 +114,100 @@ def build_trivial_lqr_ocp():
     return ocp
 
 
-def solve_trivial_lqr_with_acados() -> AcadosBaselineResult:
-    _ensure_acados_python_interface_on_path()
-    try:
-        from acados_template import AcadosOcpSolver
-    except Exception as exc:  # pragma: no cover - depends on local install
-        raise RuntimeError(_missing_dependency_message(exc)) from exc
+def build_nonlinear_pendulum_ocp(*, soft_constraints: bool):
+    ca, AcadosModel, AcadosOcp, _ = _imports()
+    problem = build_nonlinear_pendulum_problem()
+    nx = problem.nx
+    nu = problem.nu
 
-    ocp = build_trivial_lqr_ocp()
-    solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
+    model = AcadosModel()
+    model.name = f"nonlinear_pendulum_acados_{'soft' if soft_constraints else 'hard'}"
+    model.x = ca.SX.sym("x", nx)
+    model.u = ca.SX.sym("u", nu)
+    model.xdot = ca.SX.sym("xdot", nx)
+    theta = model.x[0]
+    omega = model.x[1]
+    torque = model.u[0]
+    inertia = problem.inertia
+    f_expl = ca.vertcat(
+        omega,
+        -(problem.gravity / problem.length) * ca.sin(theta)
+        - (problem.damping / inertia) * omega
+        + torque / inertia,
+    )
+    model.f_expl_expr = f_expl
+    model.f_impl_expr = model.xdot - f_expl
+
+    x_goal = ca.DM(problem.x_goal)
+    Q = ca.DM(problem.Q)
+    R = ca.DM(problem.R)
+    Qf = ca.DM(problem.Qf)
+    angle_error = ca.atan2(ca.sin(theta - x_goal[0]), ca.cos(theta - x_goal[0]))
+    error = ca.vertcat(angle_error, omega - x_goal[1])
+    running_cost = problem.dt * (
+        ca.mtimes([error.T, Q, error]) + ca.mtimes([model.u.T, R, model.u])
+    )
+    terminal_cost = ca.mtimes([error.T, Qf, error])
+
+    x_min = ca.DM(problem.x_min)
+    x_max = ca.DM(problem.x_max)
+    u_min = ca.DM(problem.u_min)
+    u_max = ca.DM(problem.u_max)
+    state_violation = ca.fmax(x_min - model.x, 0) + ca.fmax(model.x - x_max, 0)
+    control_violation = ca.fmax(u_min - model.u, 0) + ca.fmax(model.u - u_max, 0)
+    soft_penalty = (
+        problem.state_soft_weight * ca.dot(state_violation, state_violation)
+        + problem.control_soft_weight * ca.dot(control_violation, control_violation)
+    )
+    terminal_state_penalty = problem.state_soft_weight * ca.dot(state_violation, state_violation)
+    hard_state_penalty = 1e4 * ca.dot(state_violation, state_violation)
+
+    ocp = AcadosOcp()
+    ocp.model = model
+    mode_name = "soft" if soft_constraints else "hard"
+    ocp.code_gen_opts.code_export_directory = f"/tmp/acados_item4_generated_code_pendulum_{mode_name}"
+    ocp.code_gen_opts.json_file = f"/tmp/nonlinear_pendulum_{mode_name}_acados_ocp.json"
+
+    ocp.solver_options.N_horizon = problem.horizon
+    ocp.solver_options.tf = problem.final_time
+
+    ocp.cost.cost_type = "EXTERNAL"
+    ocp.cost.cost_type_e = "EXTERNAL"
+    if soft_constraints:
+        ocp.model.cost_expr_ext_cost = running_cost + soft_penalty
+        ocp.model.cost_expr_ext_cost_e = terminal_cost + terminal_state_penalty
+    else:
+        ocp.model.cost_expr_ext_cost = running_cost + hard_state_penalty
+        ocp.model.cost_expr_ext_cost_e = terminal_cost + hard_state_penalty
+
+    ocp.constraints.x0 = problem.x0.copy()
+    ocp.constraints.lbu = problem.u_min.copy()
+    ocp.constraints.ubu = problem.u_max.copy()
+    ocp.constraints.idxbu = np.arange(nu)
+    if not soft_constraints:
+        ocp.constraints.lbx = problem.x_min.copy()
+        ocp.constraints.ubx = problem.x_max.copy()
+        ocp.constraints.idxbx = np.arange(nx)
+        ocp.constraints.lbx_e = problem.x_min.copy()
+        ocp.constraints.ubx_e = problem.x_max.copy()
+        ocp.constraints.idxbx_e = np.arange(nx)
+
+    ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
+    ocp.solver_options.hessian_approx = "EXACT"
+    ocp.solver_options.integrator_type = "ERK"
+    ocp.solver_options.nlp_solver_type = "SQP"
+    ocp.solver_options.globalization = "MERIT_BACKTRACKING"
+
+    return ocp, problem
+
+
+def _extract_result(solver, ocp, *, problem_name: str, constraint_mode: str, x_min=None, x_max=None):
     status = solver.solve()
-
     horizon = ocp.solver_options.N_horizon
     nx = ocp.model.x.rows()
     nu = ocp.model.u.rows()
     sim_x = np.zeros((horizon + 1, nx))
     sim_u = np.zeros((horizon, nu))
-
     for stage in range(horizon):
         sim_x[stage, :] = solver.get(stage, "x")
         sim_u[stage, :] = solver.get(stage, "u")
@@ -137,37 +219,80 @@ def solve_trivial_lqr_with_acados() -> AcadosBaselineResult:
         try:
             sqp_iterations = int(solver.get_stats("sqp_iter"))
         except Exception:
-            sqp_iterations = None
+            pass
         try:
             objective_value = float(solver.get_cost())
         except Exception:
-            objective_value = None
+            pass
 
-    violation = np.maximum(sim_u - ocp.constraints.ubu, 0.0) + np.maximum(
+    control_violation = np.maximum(sim_u - ocp.constraints.ubu, 0.0) + np.maximum(
         ocp.constraints.lbu - sim_u, 0.0
     )
+    if x_min is None or x_max is None:
+        max_state_violation = 0.0
+    else:
+        state_violation = np.maximum(sim_x - x_max[None, :], 0.0) + np.maximum(
+            x_min[None, :] - sim_x, 0.0
+        )
+        max_state_violation = float(np.max(np.abs(state_violation)))
 
     return AcadosBaselineResult(
+        problem_name=problem_name,
+        constraint_mode=constraint_mode,
         status=status,
         sqp_iterations=sqp_iterations,
         objective_value=objective_value,
-        max_control_violation=float(np.max(np.abs(violation))),
+        max_control_violation=float(np.max(np.abs(control_violation))) if len(sim_u) else 0.0,
+        max_state_violation=max_state_violation,
         state_trajectory=sim_x,
         control_trajectory=sim_u,
     )
 
 
+def solve_trivial_lqr_with_acados() -> AcadosBaselineResult:
+    _, _, _, AcadosOcpSolver = _imports()
+    ocp = build_trivial_lqr_ocp()
+    solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
+    return _extract_result(
+        solver,
+        ocp,
+        problem_name="trivial_lqr",
+        constraint_mode="hard",
+    )
+
+
+def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool) -> AcadosBaselineResult:
+    _, _, _, AcadosOcpSolver = _imports()
+    ocp, problem = build_nonlinear_pendulum_ocp(soft_constraints=soft_constraints)
+    solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
+    return _extract_result(
+        solver,
+        ocp,
+        problem_name="nonlinear_pendulum",
+        constraint_mode="soft" if soft_constraints else "hard",
+        x_min=problem.x_min,
+        x_max=problem.x_max,
+    )
+
+
 def format_result(result: AcadosBaselineResult) -> str:
     final_state = np.array2string(result.state_trajectory[-1], precision=4)
-    first_control = np.array2string(result.control_trajectory[0], precision=4)
+    first_control = (
+        np.array2string(result.control_trajectory[0], precision=4)
+        if len(result.control_trajectory)
+        else "[]"
+    )
     state_trajectory = np.array2string(result.state_trajectory, precision=4)
     control_trajectory = np.array2string(result.control_trajectory, precision=4)
     return (
         "item4_acados_cpu\n"
+        f"  problem: {result.problem_name}\n"
+        f"  constraint_mode: {result.constraint_mode}\n"
         f"  status: {result.status}\n"
         f"  sqp_iterations: {result.sqp_iterations}\n"
         f"  objective: {result.objective_value}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
+        f"  max_state_violation: {result.max_state_violation:.3e}\n"
         f"  first_control: {first_control}\n"
         f"  final_state: {final_state}\n"
         f"  state_trajectory:\n{state_trajectory}\n"
@@ -175,9 +300,38 @@ def format_result(result: AcadosBaselineResult) -> str:
     )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run item 4 acados CPU baselines.")
+    parser.add_argument(
+        "--problem",
+        choices=("trivial", "nonlinear"),
+        default="trivial",
+        help="Select which benchmark problem to run.",
+    )
+    parser.add_argument(
+        "--constraint-mode",
+        choices=("hard", "soft", "both"),
+        default="both",
+        help="Constraint handling mode for the nonlinear pendulum benchmark.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    result = solve_trivial_lqr_with_acados()
-    print(format_result(result))
+    args = parse_args()
+    if args.problem == "trivial":
+        print(format_result(solve_trivial_lqr_with_acados()))
+        return
+
+    results = []
+    if args.constraint_mode in ("hard", "both"):
+        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=False))
+    if args.constraint_mode in ("soft", "both"):
+        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=True))
+    for index, result in enumerate(results):
+        if index:
+            print()
+        print(format_result(result))
 
 
 if __name__ == "__main__":

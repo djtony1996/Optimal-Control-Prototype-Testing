@@ -1,27 +1,19 @@
 # Item 4 CPU Baseline
 
-This repository is now focused on item 4 of the minimal prototype plan:
+This README documents item 4 of the minimal prototype plan:
 
 - direct transcription on CPU
 - `acados` multiple shooting
-- hard control bounds
-- trivial dynamics `LQR` case
-
-The trivial dynamics `LQR` problem uses:
-
-- `dx/dt = A x + B u`
-- `l(x, u) = x^T Q x + u^T R u`
-- box-bounded control inputs
-
-After discretization, the baseline solves a finite-horizon constrained optimal
-control problem with `acados` on CPU.
+- both the trivial `LQR` case and the nonlinear pendulum case
 
 ## Problem Being Solved
 
-The function
-[`build_trivial_lqr_ocp()`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/acados_cpu.py)
-sets up the following trivial finite-horizon LQR control problem with hard
-input constraints:
+Item 4 now supports two benchmark problems from the same `acados` CPU path.
+
+## Trivial LQR
+
+The trivial benchmark solves the same finite-horizon `LQR` problem shape as
+items 1, 2, 3, and 5.
 
 - state dimension: `x in R^2`
 - control dimension: `u in R`
@@ -56,35 +48,70 @@ with
 
 - `Q_f = diag([8.0, 1.0])`
 
-So the solver tries to drive the initial state toward the origin over the
-horizon while minimizing quadratic state/control cost and enforcing the hard
-control bounds at every shooting interval.
+## Nonlinear Pendulum
+
+The nonlinear benchmark uses the shared pendulum swing-up problem from page 6
+of the project PDF.
+
+- state dimension: `x = (theta, theta_dot) in R^2`
+- control dimension: `u in R`
+- horizon length: `N = 40`
+- final time: `T = 4.0`
+- initial state: `x0 = [0.0, 0.0]`
+- target state: `x_goal = [pi, 0.0]`
+- state bounds: `theta in [-2 pi, 2 pi]`, `theta_dot in [-8.0, 8.0]`
+- nominal torque bounds: `-2.5 <= u_k <= 2.5`
+
+The continuous-time dynamics are:
+
+- `theta_dot = omega`
+- `omega_dot = -(g / L) sin(theta) - (B / (M L^2)) omega + u / (M L^2)`
+
+The nonlinear acados runner supports both:
+
+- `hard` mode: explicit `acados` box constraints on both torque and state
+- `soft` mode: explicit `acados` box constraints on torque, with smooth
+  quadratic state/control penalties added to the external cost
+
+The soft penalties used in the current nonlinear item 4 implementation are:
+
+- state violation:
+  `v_x(x) = max(x_min - x, 0) + max(x - x_max, 0)`
+- control violation:
+  `v_u(u) = max(u_min - u, 0) + max(u - u_max, 0)`
+
+The nonlinear running cost in soft mode becomes:
+
+- `l_soft(x, u) = dt * (e(x)^T Q e(x) + u^T R u) + w_x ||v_x(x)||^2 + w_u ||v_u(u)||^2`
+
+where `e(x)` is the pendulum state error relative to the upright target, with
+the angle component wrapped onto `[-pi, pi]`.
+
+The nonlinear terminal cost in soft mode becomes:
+
+- `phi_soft(x_N) = e(x_N)^T Q_f e(x_N) + w_x ||v_x(x_N)||^2`
 
 ## Code Layout
 
 - item 4 solver: [`src/optimal_control_prototype_testing/acados_cpu.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/acados_cpu.py)
+- shared nonlinear problem: [`src/optimal_control_prototype_testing/nonlinear_pendulum.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/nonlinear_pendulum.py)
 - startup script: [`scripts/run_item4_acados.sh`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/scripts/run_item4_acados.sh)
 - setup helper: [`scripts/setup_acados_macos.sh`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/scripts/setup_acados_macos.sh)
 
 ## How Item 4 Solves the Problem
 
 [`acados_cpu.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/acados_cpu.py)
-implements the trivial-case CPU baseline in four steps:
+now supports both benchmarks:
 
-1. It defines the continuous-time trivial `LQR` model:
-   linear dynamics, quadratic running cost, quadratic terminal cost, and hard
-   control bounds.
-2. It builds an `AcadosOcp` problem with:
-   multiple shooting, `ERK` integration, `SQP`, and the `HPIPM` QP solver.
-3. It asks `acados` to generate and compile a problem-specific solver for that
-   OCP, using temporary generated files under `/tmp`.
-4. It solves the finite-horizon problem and prints the resulting solver status,
-   SQP iteration count, objective value, control-bound violation, first control,
-   final state, full state trajectory, and full control trajectory.
-
-So the Python file is the high-level problem description and runner, while
-`acados` provides the generated low-level solver that actually performs the CPU
-optimization.
+1. For the trivial case, it builds a linear-quadratic `AcadosOcp` with
+   multiple shooting, `ERK`, and `SQP`.
+2. For the nonlinear pendulum, it builds a nonlinear `AcadosOcp` with
+   pendulum dynamics, wrapped-angle swing-up cost, and either hard or soft
+   constraint handling.
+3. It asks `acados` to generate and compile a problem-specific solver for the
+   selected OCP under `/tmp`.
+4. It solves the horizon with `PARTIAL_CONDENSING_HPIPM` and reports the
+   resulting trajectories and solver statistics.
 
 ## One-Time Setup
 
@@ -113,29 +140,41 @@ baseline runs correctly with the default `HPIPM` QP solver.
 
 ## Run
 
-After setup, start item 4 with:
+After setup, the existing trivial baseline still runs with:
 
 ```bash
 ./scripts/run_item4_acados.sh
 ```
 
-This script sets:
+To run the nonlinear pendulum in hard mode:
 
-- `ACADOS_SOURCE_DIR`
-- `DYLD_LIBRARY_PATH`
-- `MPLCONFIGDIR`
-- `PYTHONPATH`
+```bash
+./scripts/run_item4_acados.sh --problem nonlinear --constraint-mode hard
+```
 
-and then runs the trivial-case item 4 baseline.
+To run the nonlinear pendulum in soft mode:
+
+```bash
+./scripts/run_item4_acados.sh --problem nonlinear --constraint-mode soft
+```
+
+To run both nonlinear modes in one command:
+
+```bash
+./scripts/run_item4_acados.sh --problem nonlinear --constraint-mode both
+```
 
 ## Current Output
 
-The current trivial-case item 4 run completes successfully and reports:
+The current item 4 runner prints:
 
+- `problem`
+- `constraint_mode`
 - solver `status`
 - `sqp_iterations`
 - `objective`
 - `max_control_violation`
+- `max_state_violation`
 - first control value
 - final state
 - full `state_trajectory`

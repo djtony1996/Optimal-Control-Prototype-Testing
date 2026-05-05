@@ -10,4 +10,4 @@ export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
 export PYTHONPATH="$REPO_ROOT/src"
 
 cd "$REPO_ROOT"
-exec .venv/bin/python -m optimal_control_prototype_testing.acados_cpu
+exec .venv/bin/python -m optimal_control_prototype_testing.acados_cpu "$@"
