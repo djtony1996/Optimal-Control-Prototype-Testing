@@ -4,13 +4,17 @@ This README documents item 2 of the minimal prototype plan:
 
 - `DDP/iLQR` on GPU
 - `JAX + Diffrax`
-- trivial dynamics `LQR` case
+- both the trivial `LQR` case and the nonlinear pendulum case
 - `iLQR` first
 
 ## Problem Being Solved
 
-The item 2 baseline uses the same trivial finite-horizon `LQR` setup as items
-1, 4, and 5.
+Item 2 now supports two benchmark problems from the same iLQR code path.
+
+## Trivial LQR
+
+The trivial benchmark uses the same finite-horizon `LQR` setup as items 1, 3,
+4, and 5.
 
 - state dimension: `x in R^2`
 - control dimension: `u in R`
@@ -41,16 +45,61 @@ and the terminal cost uses:
 
 - `Q_f = diag([8.0, 1.0])`
 
+## Nonlinear Pendulum
+
+The nonlinear benchmark uses the shared pendulum swing-up problem from page 6
+of the project PDF.
+
+- state dimension: `x = (theta, theta_dot) in R^2`
+- control dimension: `u in R`
+- horizon length: `N = 40`
+- final time: `T = 4.0`
+- initial state: `x0 = [0.0, 0.0]`
+- target state: `x_goal = [pi, 0.0]`
+- state bounds: `theta in [-2 pi, 2 pi]`, `theta_dot in [-8.0, 8.0]`
+- nominal torque bounds: `-2.5 <= u_k <= 2.5`
+
+The continuous-time dynamics are:
+
+- `theta_dot = omega`
+- `omega_dot = -(g / L) sin(theta) - (B / (M L^2)) omega + u / (M L^2)`
+
+The nonlinear iLQR runner supports both:
+
+- `hard` mode: log-barrier treatment for torque plus a large quadratic penalty
+  for state-limit violation
+- `soft` mode: log-barrier treatment for torque plus smooth quadratic
+  state/control penalties
+
+The soft penalties used in the current nonlinear item 2 implementation are:
+
+- state violation:
+  `v_x(x) = max(x_min - x, 0) + max(x - x_max, 0)`
+- control violation:
+  `v_u(u) = max(u_min - u, 0) + max(u - u_max, 0)`
+
+The nonlinear running cost in soft mode becomes:
+
+- `l_soft(x, u) = dt * (e(x)^T Q e(x) + u^T R u) + barrier(u) + w_x ||v_x(x)||^2 + w_u ||v_u(u)||^2`
+
+where `e(x)` is the pendulum state error relative to the upright target, with
+the angle component wrapped onto `[-pi, pi]`.
+
+The nonlinear terminal cost in soft mode becomes:
+
+- `phi_soft(x_N) = e(x_N)^T Q_f e(x_N) + w_x ||v_x(x_N)||^2`
+
 ## Current Status
 
 The current item 2 implementation includes:
 
 - a separate `item2_jax` module
 - a pure `JAX` iLQR solver
+- both trivial and nonlinear benchmark paths
 - a JIT-compiled fixed-iteration solve loop
 - autodiff-based dynamics and stage-cost derivatives
-- a `Diffrax` vs exact discretization consistency check
-- a log-barrier treatment for the hard control bound
+- `Diffrax`-based nonlinear rollout integration
+- a log-barrier treatment for control bounds
 
 The current item 2 implementation does **not** yet include:
 
@@ -62,33 +111,42 @@ The current item 2 implementation does **not** yet include:
 
 - solver: [`src/optimal_control_prototype_testing/item2_jax/ilqr.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/item2_jax/ilqr.py)
 - runner: [`src/optimal_control_prototype_testing/item2_jax/run_item2.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/item2_jax/run_item2.py)
+- shared nonlinear problem: [`src/optimal_control_prototype_testing/nonlinear_pendulum.py`](/Users/jitongding/Documents/GitHub/Optimal-Control-Prototype-Testing/src/optimal_control_prototype_testing/nonlinear_pendulum.py)
 
 ## How Item 2 Solves the Problem
 
 The current item 2 prototype works in these steps:
 
-1. It reuses the same trivial continuous-time `LQR` setup as the other items.
-2. It discretizes the linear dynamics with zero-order hold and checks one step
-   against `Diffrax`.
-3. It rolls out a nominal control sequence to get the state trajectory.
-4. It computes dynamics and cost derivatives with `jax.jacfwd`, `jax.grad`,
+1. It selects either the trivial `LQR` benchmark or the nonlinear pendulum benchmark.
+2. It rolls out a nominal control sequence to get a state trajectory.
+3. It computes dynamics and cost derivatives with `jax.jacfwd`, `jax.grad`,
    and `jax.hessian`.
-5. It runs the iLQR backward Riccati sweep to compute feedforward and feedback
-   gains.
-6. It runs a forward rollout with line-search candidates to update the control
-   trajectory.
-7. It repeats until the control update is small or the cost improvement stalls.
+4. It runs the iLQR backward Riccati sweep to compute feedforward and feedback gains.
+5. It runs a forward rollout with line-search candidates to update the control trajectory.
+6. It repeats until the control update is small or the cost improvement stalls.
 
-The hard control bound is handled with a small log barrier in the running cost,
-and the forward rollout clips trial controls slightly inside the feasible box so
-the barrier remains well-defined.
+For the trivial case, the rollout uses the zero-order-hold discrete dynamics.
+For the nonlinear pendulum, the rollout uses `Diffrax` integration and reports a
+one-step consistency check against an `RK4` reference step.
 
 ## Run
 
-In the current local environment, item 2 runs on CPU with:
+In the current local environment, item 2 still runs the trivial benchmark on CPU by default:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item2_jax.run_item2
+```
+
+To run the nonlinear pendulum in hard mode:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item2_jax.run_item2 --problem nonlinear --constraint-mode hard
+```
+
+To run the nonlinear pendulum in soft mode:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item2_jax.run_item2 --problem nonlinear --constraint-mode soft
 ```
 
 ## Google Colab
@@ -106,12 +164,12 @@ To run item 2 on GPU in Google Colab:
 Example notebook cells:
 
 ```python
-!git clone <your-repo-url>
-%cd Optimal-Control-Prototype-Testing
+!pip install -U "jax[cuda12]" diffrax numpy
 ```
 
 ```python
-!pip install -U "jax[cuda12]" diffrax numpy
+!git clone <your-repo-url>
+%cd Optimal-Control-Prototype-Testing
 ```
 
 ```python
@@ -123,6 +181,12 @@ print(jax.devices())
 
 ```python
 !PYTHONPATH=src python -m optimal_control_prototype_testing.item2_jax.run_item2
+```
+
+To run the nonlinear pendulum instead:
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item2_jax.run_item2 --problem nonlinear --constraint-mode hard
 ```
 
 Expected signs of a successful GPU run:
@@ -145,11 +209,14 @@ The current runner prints:
 - whether `x64` is enabled
 - the default solver dtype
 - horizon and time-step information
+- `problem`
+- `constraint_mode`
 - convergence flag
 - iteration count
 - `objective`
 - `control_update_norm`
 - `max_control_violation`
-- `diffrax_vs_exact_step_error`
+- `max_state_violation`
+- `diffrax_vs_reference_step_error`
 - full `state_trajectory`
 - full `control_trajectory`
