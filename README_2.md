@@ -91,6 +91,52 @@ In the current local environment, item 2 runs on CPU with:
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item2_jax.run_item2
 ```
 
+## Google Colab
+
+To run item 2 on GPU in Google Colab:
+
+1. Open a new notebook in Google Colab.
+2. Change the runtime to `GPU`.
+3. Make the repository available in the notebook, for example by cloning a
+   public repository URL or uploading a zip if the repository is private.
+4. Install the dependencies.
+5. Verify that `JAX` sees the GPU.
+6. Run the item 2 module.
+
+Example notebook cells:
+
+```python
+!git clone <your-repo-url>
+%cd Optimal-Control-Prototype-Testing
+```
+
+```python
+!pip install -U "jax[cuda12]" diffrax numpy
+```
+
+```python
+import jax
+print(jax.__version__)
+print(jax.default_backend())
+print(jax.devices())
+```
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item2_jax.run_item2
+```
+
+Expected signs of a successful GPU run:
+
+- `backend: gpu`
+- `devices: ('cuda:0',)` or another CUDA device
+- `converged: True`
+
+If Colab reports a JAX or CUDA plugin version mismatch, reinstall `JAX` and
+restart the runtime before rerunning the cells above.
+
+If the repository is private, clone with a token or upload a zip archive
+instead of using a public `git clone` command.
+
 ## Current Output
 
 The current runner prints:

@@ -9,6 +9,7 @@ dependencies = []
 [project.scripts]
 optimal-control-item1-jax = "optimal_control_prototype_testing.item1_jax.run_item1:main"
 optimal-control-item2-jax = "optimal_control_prototype_testing.item2_jax.run_item2:main"
+optimal-control-item3-jax = "optimal_control_prototype_testing.item3_jax.run_item3:main"
 optimal-control-item4-acados = "optimal_control_prototype_testing.acados_cpu:main"
 optimal-control-item5-crocoddyl = "optimal_control_prototype_testing.crocoddyl_cpu:main"
 
