@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from dataclasses import dataclass
@@ -7,13 +8,22 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.linalg import expm
 
+from optimal_control_prototype_testing.nonlinear_pendulum import (
+    NonlinearPendulumProblem,
+    build_nonlinear_pendulum_problem,
+    wrap_angle,
+)
+
 
 @dataclass(frozen=True)
 class CrocoddylBaselineResult:
+    problem_name: str
+    constraint_mode: str
     converged: bool
     iterations: int
     objective_value: float
     max_control_violation: float
+    max_state_violation: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
 
@@ -55,6 +65,15 @@ def _ensure_crocoddyl_python_path() -> None:
             sys.path.append(path)
 
 
+def _import_crocoddyl():
+    _ensure_crocoddyl_python_path()
+    try:
+        import crocoddyl
+    except Exception as exc:  # pragma: no cover - depends on local install
+        raise RuntimeError(_missing_dependency_message(exc)) from exc
+    return crocoddyl
+
+
 def zero_order_hold_discretization(A: np.ndarray, B: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndarray]:
     nx, nu = A.shape[0], B.shape[1]
     block = np.zeros((nx + nu, nx + nu), dtype=float)
@@ -64,12 +83,68 @@ def zero_order_hold_discretization(A: np.ndarray, B: np.ndarray, dt: float) -> t
     return transition[:nx, :nx], transition[:nx, nx:]
 
 
+class PendulumActionModel:
+    def __init__(
+        self,
+        crocoddyl,
+        problem: NonlinearPendulumProblem,
+        *,
+        soft_constraints: bool,
+        terminal: bool,
+    ) -> None:
+        self._crocoddyl = crocoddyl
+        self.problem = problem
+        self.soft_constraints = soft_constraints
+        self.terminal = terminal
+        state = crocoddyl.StateVector(problem.nx)
+        nu = 0 if terminal else problem.nu
+        nr = 1
+        crocoddyl.ActionModelAbstract.__init__(self, state, nu, nr)
+
+    def createData(self):
+        return self._crocoddyl.ActionDataAbstract(self)
+
+    def _rk4_step(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+        dt = self.problem.dt
+        f = self.problem.continuous_dynamics
+        k1 = f(x, u)
+        k2 = f(x + 0.5 * dt * k1, u)
+        k3 = f(x + 0.5 * dt * k2, u)
+        k4 = f(x + dt * k3, u)
+        return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    def _hard_state_penalty(self, x: np.ndarray) -> float:
+        violation = self.problem.hard_state_residual(x)
+        return float(1e4 * violation @ violation)
+
+    def calc(self, data, x, u=None):
+        x = np.asarray(x, dtype=float)
+        if self.terminal:
+            u = np.zeros(0, dtype=float)
+            data.xnext = x.copy()
+        else:
+            u = np.asarray(u, dtype=float)
+            data.xnext = self._rk4_step(x, u)
+
+        if self.terminal:
+            if self.soft_constraints:
+                cost = self.problem.terminal_cost(x, soft_constraints=True)
+            else:
+                cost = self.problem.terminal_cost(x, soft_constraints=False) + self._hard_state_penalty(x)
+        else:
+            if self.soft_constraints:
+                cost = self.problem.running_cost(x, u, soft_constraints=True)
+            else:
+                cost = self.problem.running_cost(x, u, soft_constraints=False) + self._hard_state_penalty(x)
+        data.cost = cost
+        data.r = np.array([0.0], dtype=float)
+
+    def calcDiff(self, data, x, u=None):
+        raise NotImplementedError("Use ActionModelNumDiff for the nonlinear pendulum model.")
+
+
 def build_trivial_lqr_problem():
-    _ensure_crocoddyl_python_path()
-    try:
-        import crocoddyl
-    except Exception as exc:  # pragma: no cover - depends on local install
-        raise RuntimeError(_missing_dependency_message(exc)) from exc
+    crocoddyl = _import_crocoddyl()
 
     nx = 2
     nu = 1
@@ -120,29 +195,94 @@ def build_trivial_lqr_problem():
 
     problem = crocoddyl.ShootingProblem(x0, [running_model] * horizon, terminal_model)
     solver = crocoddyl.SolverBoxDDP(problem)
-
     return solver, x0
+
+
+def build_nonlinear_pendulum_solver(
+    *,
+    soft_constraints: bool,
+) -> tuple[object, NonlinearPendulumProblem]:
+    crocoddyl = _import_crocoddyl()
+    problem = build_nonlinear_pendulum_problem()
+
+    class RunningPendulumModel(PendulumActionModel, crocoddyl.ActionModelAbstract):
+        pass
+
+    class TerminalPendulumModel(PendulumActionModel, crocoddyl.ActionModelAbstract):
+        pass
+
+    running_base = RunningPendulumModel(crocoddyl, problem, soft_constraints=soft_constraints, terminal=False)
+    terminal_base = TerminalPendulumModel(crocoddyl, problem, soft_constraints=soft_constraints, terminal=True)
+    running_model = crocoddyl.ActionModelNumDiff(running_base)
+    terminal_model = crocoddyl.ActionModelNumDiff(terminal_base)
+
+    if not soft_constraints:
+        running_model.u_lb = problem.u_min.copy()
+        running_model.u_ub = problem.u_max.copy()
+
+    shooting = crocoddyl.ShootingProblem(problem.x0.copy(), [running_model] * problem.horizon, terminal_model)
+    solver = crocoddyl.SolverDDP(shooting) if soft_constraints else crocoddyl.SolverBoxDDP(shooting)
+    return solver, problem
+
+
+def _state_violation(problem: NonlinearPendulumProblem, xs: np.ndarray) -> float:
+    upper = np.maximum(xs - problem.x_max[None, :], 0.0)
+    lower = np.maximum(problem.x_min[None, :] - xs, 0.0)
+    return float(np.max(np.abs(lower + upper)))
 
 
 def solve_trivial_lqr_with_crocoddyl() -> CrocoddylBaselineResult:
     solver, x0 = build_trivial_lqr_problem()
     horizon = solver.problem.T
-
     xs_init = [x0.copy() for _ in range(horizon + 1)]
     us_init = [np.zeros(solver.problem.runningModels[0].nu) for _ in range(horizon)]
-
     converged = bool(solver.solve(xs_init, us_init, 100, False))
     xs = np.asarray(solver.xs)
     us = np.asarray(solver.us)
     u_lb = solver.problem.runningModels[0].u_lb
     u_ub = solver.problem.runningModels[0].u_ub
     violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
-
     return CrocoddylBaselineResult(
+        problem_name="trivial_lqr",
+        constraint_mode="hard",
         converged=converged,
         iterations=int(solver.iter),
         objective_value=float(solver.cost),
         max_control_violation=float(np.max(np.abs(violation))) if len(us) else 0.0,
+        max_state_violation=0.0,
+        state_trajectory=xs,
+        control_trajectory=us,
+    )
+
+
+def solve_nonlinear_pendulum_with_crocoddyl(
+    *,
+    soft_constraints: bool,
+) -> CrocoddylBaselineResult:
+    solver, problem = build_nonlinear_pendulum_solver(soft_constraints=soft_constraints)
+    horizon = solver.problem.T
+    xs_init = [problem.x0.copy() for _ in range(horizon + 1)]
+    us_init = [np.zeros(solver.problem.runningModels[0].nu) for _ in range(horizon)]
+    converged = bool(solver.solve(xs_init, us_init, 200, False))
+    xs = np.asarray(solver.xs)
+    us = np.asarray(solver.us)
+    if soft_constraints:
+        control_violation = np.maximum(us - problem.u_max[None, :], 0.0) + np.maximum(
+            problem.u_min[None, :] - us,
+            0.0,
+        )
+    else:
+        u_lb = solver.problem.runningModels[0].u_lb
+        u_ub = solver.problem.runningModels[0].u_ub
+        control_violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
+    return CrocoddylBaselineResult(
+        problem_name="nonlinear_pendulum",
+        constraint_mode="soft" if soft_constraints else "hard",
+        converged=converged,
+        iterations=int(solver.iter),
+        objective_value=float(solver.cost),
+        max_control_violation=float(np.max(np.abs(control_violation))) if len(us) else 0.0,
+        max_state_violation=_state_violation(problem, xs),
         state_trajectory=xs,
         control_trajectory=us,
     )
@@ -150,15 +290,22 @@ def solve_trivial_lqr_with_crocoddyl() -> CrocoddylBaselineResult:
 
 def format_result(result: CrocoddylBaselineResult) -> str:
     final_state = np.array2string(result.state_trajectory[-1], precision=4)
-    first_control = np.array2string(result.control_trajectory[0], precision=4)
+    first_control = (
+        np.array2string(result.control_trajectory[0], precision=4)
+        if len(result.control_trajectory)
+        else "[]"
+    )
     state_trajectory = np.array2string(result.state_trajectory, precision=4)
     control_trajectory = np.array2string(result.control_trajectory, precision=4)
     return (
         "item5_crocoddyl_cpu\n"
+        f"  problem: {result.problem_name}\n"
+        f"  constraint_mode: {result.constraint_mode}\n"
         f"  converged: {result.converged}\n"
         f"  iterations: {result.iterations}\n"
         f"  objective: {result.objective_value}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
+        f"  max_state_violation: {result.max_state_violation:.3e}\n"
         f"  first_control: {first_control}\n"
         f"  final_state: {final_state}\n"
         f"  state_trajectory:\n{state_trajectory}\n"
@@ -166,9 +313,38 @@ def format_result(result: CrocoddylBaselineResult) -> str:
     )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run item 5 Crocoddyl CPU baselines.")
+    parser.add_argument(
+        "--problem",
+        choices=("trivial", "nonlinear"),
+        default="trivial",
+        help="Select which benchmark problem to run.",
+    )
+    parser.add_argument(
+        "--constraint-mode",
+        choices=("hard", "soft", "both"),
+        default="both",
+        help="Constraint handling mode for the nonlinear pendulum benchmark.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    result = solve_trivial_lqr_with_crocoddyl()
-    print(format_result(result))
+    args = parse_args()
+    if args.problem == "trivial":
+        print(format_result(solve_trivial_lqr_with_crocoddyl()))
+        return
+
+    results = []
+    if args.constraint_mode in ("hard", "both"):
+        results.append(solve_nonlinear_pendulum_with_crocoddyl(soft_constraints=False))
+    if args.constraint_mode in ("soft", "both"):
+        results.append(solve_nonlinear_pendulum_with_crocoddyl(soft_constraints=True))
+    for index, result in enumerate(results):
+        if index:
+            print()
+        print(format_result(result))
 
 
 if __name__ == "__main__":
