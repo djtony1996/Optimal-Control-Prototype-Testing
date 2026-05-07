@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -14,9 +15,11 @@ from optimal_control_prototype_testing.nonlinear_pendulum import build_nonlinear
 class AcadosBaselineResult:
     problem_name: str
     constraint_mode: str
+    horizon: int
     status: int
     sqp_iterations: int | None
     objective_value: float | None
+    runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
     state_trajectory: np.ndarray
@@ -57,12 +60,11 @@ def _imports():
     return ca, AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
-def build_trivial_lqr_ocp():
+def build_trivial_lqr_ocp(*, horizon: int = 20):
     ca, AcadosModel, AcadosOcp, _ = _imports()
 
     nx = 2
     nu = 1
-    horizon = 20
     final_time = 2.0
 
     A = np.array([[0.0, 1.0], [-0.25, -0.1]])
@@ -114,9 +116,11 @@ def build_trivial_lqr_ocp():
     return ocp
 
 
-def build_nonlinear_pendulum_ocp(*, soft_constraints: bool):
+def build_nonlinear_pendulum_ocp(*, soft_constraints: bool, horizon: int | None = None):
     ca, AcadosModel, AcadosOcp, _ = _imports()
     problem = build_nonlinear_pendulum_problem()
+    if horizon is not None:
+        problem = replace(problem, horizon=horizon)
     nx = problem.nx
     nu = problem.nu
 
@@ -202,7 +206,9 @@ def build_nonlinear_pendulum_ocp(*, soft_constraints: bool):
 
 
 def _extract_result(solver, ocp, *, problem_name: str, constraint_mode: str, x_min=None, x_max=None):
+    start = time.perf_counter()
     status = solver.solve()
+    runtime_seconds = time.perf_counter() - start
     horizon = ocp.solver_options.N_horizon
     nx = ocp.model.x.rows()
     nu = ocp.model.u.rows()
@@ -239,9 +245,11 @@ def _extract_result(solver, ocp, *, problem_name: str, constraint_mode: str, x_m
     return AcadosBaselineResult(
         problem_name=problem_name,
         constraint_mode=constraint_mode,
+        horizon=horizon,
         status=status,
         sqp_iterations=sqp_iterations,
         objective_value=objective_value,
+        runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(control_violation))) if len(sim_u) else 0.0,
         max_state_violation=max_state_violation,
         state_trajectory=sim_x,
@@ -249,9 +257,9 @@ def _extract_result(solver, ocp, *, problem_name: str, constraint_mode: str, x_m
     )
 
 
-def solve_trivial_lqr_with_acados() -> AcadosBaselineResult:
+def solve_trivial_lqr_with_acados(*, horizon: int = 20) -> AcadosBaselineResult:
     _, _, _, AcadosOcpSolver = _imports()
-    ocp = build_trivial_lqr_ocp()
+    ocp = build_trivial_lqr_ocp(horizon=horizon)
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
     return _extract_result(
         solver,
@@ -261,9 +269,9 @@ def solve_trivial_lqr_with_acados() -> AcadosBaselineResult:
     )
 
 
-def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool) -> AcadosBaselineResult:
+def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, horizon: int | None = None) -> AcadosBaselineResult:
     _, _, _, AcadosOcpSolver = _imports()
-    ocp, problem = build_nonlinear_pendulum_ocp(soft_constraints=soft_constraints)
+    ocp, problem = build_nonlinear_pendulum_ocp(soft_constraints=soft_constraints, horizon=horizon)
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
     return _extract_result(
         solver,
@@ -288,9 +296,11 @@ def format_result(result: AcadosBaselineResult) -> str:
         "item4_acados_cpu\n"
         f"  problem: {result.problem_name}\n"
         f"  constraint_mode: {result.constraint_mode}\n"
+        f"  horizon: {result.horizon}\n"
         f"  status: {result.status}\n"
         f"  sqp_iterations: {result.sqp_iterations}\n"
         f"  objective: {result.objective_value}\n"
+        f"  runtime_seconds: {result.runtime_seconds:.6f}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
         f"  max_state_violation: {result.max_state_violation:.3e}\n"
         f"  first_control: {first_control}\n"
@@ -314,20 +324,26 @@ def parse_args() -> argparse.Namespace:
         default="both",
         help="Constraint handling mode for the nonlinear pendulum benchmark.",
     )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=20,
+        help="Horizon length N to use for the selected benchmark.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     if args.problem == "trivial":
-        print(format_result(solve_trivial_lqr_with_acados()))
+        print(format_result(solve_trivial_lqr_with_acados(horizon=args.horizon)))
         return
 
     results = []
     if args.constraint_mode in ("hard", "both"):
-        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=False))
+        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=False, horizon=args.horizon))
     if args.constraint_mode in ("soft", "both"):
-        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=True))
+        results.append(solve_nonlinear_pendulum_with_acados(soft_constraints=True, horizon=args.horizon))
     for index, result in enumerate(results):
         if index:
             print()

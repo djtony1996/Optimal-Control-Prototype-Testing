@@ -158,6 +158,16 @@ To run the nonlinear pendulum in soft mode:
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode soft
 ```
 
+For horizon-scaling tests, override the default horizon directly:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode hard --horizon 20
+```
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode hard --horizon 200
+```
+
 If you want to force the current higher-precision local mode, use:
 
 ```bash
@@ -204,6 +214,16 @@ To run the nonlinear pendulum instead:
 !PYTHONPATH=src python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode hard
 ```
 
+To collect the testing metrics at the two planned horizons:
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode hard --horizon 20
+```
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item1_jax.run_item1 --problem nonlinear --constraint-mode hard --horizon 200
+```
+
 Expected signs of a successful GPU run:
 
 - `backend: gpu`
@@ -229,6 +249,7 @@ The current runner prints:
 - convergence flag
 - iteration count
 - `objective`
+- `runtime_seconds`
 - `constraint_norm`
 - `step_norm`
 - `max_control_violation`

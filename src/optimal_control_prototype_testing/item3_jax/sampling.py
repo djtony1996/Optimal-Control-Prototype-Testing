@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import jax
 import jax.numpy as jnp
@@ -36,7 +37,9 @@ class SamplingResult:
     method: str
     problem_name: str
     constraint_mode: str
+    iterations: int
     objective_value: float
+    runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
     diffrax_vs_exact_step_error: float
@@ -299,8 +302,11 @@ def solve_trivial_lqr_with_mppi(
             xs=jnp.arange(options.iterations),
         )[0]
     )
+    start_time = time.perf_counter()
     controls_star, _ = compiled(nominal_controls, key)
     states_star, cost_star = rollout_trivial_lqr(problem, controls_star)
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     reference_step = linear_diffrax_step(
         problem,
         jnp.asarray(problem.x0, dtype=dtype),
@@ -315,7 +321,9 @@ def solve_trivial_lqr_with_mppi(
         method="mppi",
         problem_name="trivial_lqr",
         constraint_mode="hard",
+        iterations=options.iterations,
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=0.0,
         diffrax_vs_exact_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
@@ -359,9 +367,12 @@ def solve_trivial_lqr_with_cem(
             xs=jnp.arange(options.iterations),
         )[0]
     )
+    start_time = time.perf_counter()
     controls_star, _, _ = compiled(mean_controls, std_controls, key)
     controls_star = clip_controls(controls_star, problem)
     states_star, cost_star = rollout_trivial_lqr(problem, controls_star)
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     reference_step = linear_diffrax_step(
         problem,
         jnp.asarray(problem.x0, dtype=dtype),
@@ -376,7 +387,9 @@ def solve_trivial_lqr_with_cem(
         method="cem",
         problem_name="trivial_lqr",
         constraint_mode="hard",
+        iterations=options.iterations,
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=0.0,
         diffrax_vs_exact_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
@@ -419,8 +432,11 @@ def solve_nonlinear_pendulum_with_mppi(
             xs=jnp.arange(options.iterations),
         )[0]
     )
+    start_time = time.perf_counter()
     controls_star, _ = compiled(nominal_controls, key)
     states_star, cost_star = rollout_nonlinear_pendulum(problem, controls_star, soft_constraints)
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     control_violation = jax.vmap(lambda uk: nonlinear_control_violation(problem, uk))(controls_star)
     state_violation = jax.vmap(lambda xk: nonlinear_state_violation(problem, xk))(states_star)
     reference_step = nonlinear_pendulum_step(
@@ -432,7 +448,9 @@ def solve_nonlinear_pendulum_with_mppi(
         method="mppi",
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
+        iterations=options.iterations,
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
         diffrax_vs_exact_step_error=0.0 * float(jnp.linalg.norm(reference_step)),
@@ -480,9 +498,12 @@ def solve_nonlinear_pendulum_with_cem(
             xs=jnp.arange(options.iterations),
         )[0]
     )
+    start_time = time.perf_counter()
     controls_star, _, _ = compiled(mean_controls, std_controls, key)
     controls_star = clip_controls(controls_star, problem)
     states_star, cost_star = rollout_nonlinear_pendulum(problem, controls_star, soft_constraints)
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     control_violation = jax.vmap(lambda uk: nonlinear_control_violation(problem, uk))(controls_star)
     state_violation = jax.vmap(lambda xk: nonlinear_state_violation(problem, xk))(states_star)
     reference_step = nonlinear_pendulum_step(
@@ -494,7 +515,9 @@ def solve_nonlinear_pendulum_with_cem(
         method="cem",
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
+        iterations=options.iterations,
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
         diffrax_vs_exact_step_error=0.0 * float(jnp.linalg.norm(reference_step)),

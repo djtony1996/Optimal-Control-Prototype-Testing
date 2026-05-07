@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 
 import numpy as np
 
@@ -19,7 +20,9 @@ def print_result(label: str, result) -> None:
     print(label)
     print(f"  problem: {result.problem_name}")
     print(f"  constraint_mode: {result.constraint_mode}")
+    print(f"  iterations: {result.iterations}")
     print(f"  objective: {result.objective_value}")
+    print(f"  runtime_seconds: {result.runtime_seconds:.6f}")
     print(f"  max_control_violation: {result.max_control_violation:.3e}")
     print(f"  max_state_violation: {result.max_state_violation:.3e}")
     print(f"  diffrax_vs_exact_step_error: {result.diffrax_vs_exact_step_error:.3e}")
@@ -47,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         default="both",
         help="Constraint handling mode for the nonlinear pendulum benchmark.",
     )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=None,
+        help="Override the default horizon length for testing.",
+    )
     return parser.parse_args()
 
 
@@ -56,12 +65,16 @@ def main() -> None:
 
     if args.problem == "trivial":
         problem = build_trivial_lqr_problem()
+        if args.horizon is not None:
+            problem = replace(problem, horizon=args.horizon)
         labels_and_results = [
             ("  mppi", solve_trivial_lqr_with_mppi(problem)),
             ("  cem", solve_trivial_lqr_with_cem(problem)),
         ]
     else:
         problem = build_nonlinear_pendulum_problem()
+        if args.horizon is not None:
+            problem = replace(problem, horizon=args.horizon)
         labels_and_results = []
         if args.constraint_mode in ("hard", "both"):
             labels_and_results.extend(

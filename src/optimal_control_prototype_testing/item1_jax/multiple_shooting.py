@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 
 import jax
@@ -62,6 +63,7 @@ class MultipleShootingResult:
     converged: bool
     iterations: int
     objective_value: float
+    runtime_seconds: float
     constraint_norm: float
     step_norm: float
     max_control_violation: float
@@ -310,9 +312,12 @@ def solve_trivial_lqr_with_multiple_shooting(
     raw_controls = jnp.arctanh(normalized)
     z0 = pack_variables(jnp.stack(states), raw_controls)
 
+    start_time = time.perf_counter()
     z_star, iterations, converged, step_norm = solve_sqp(
         z0, objective_fn, constraints_fn, unpack_fn, controls_fn, options
     )
+    jax.block_until_ready(z_star)
+    runtime_seconds = time.perf_counter() - start_time
     states_star, raw_controls_star = unpack_fn(z_star)
     controls_star = controls_fn(raw_controls_star)
     constraints = constraints_fn(z_star)
@@ -325,6 +330,7 @@ def solve_trivial_lqr_with_multiple_shooting(
         converged=converged,
         iterations=iterations,
         objective_value=float(objective_fn(z_star)),
+        runtime_seconds=runtime_seconds,
         constraint_norm=float(jnp.linalg.norm(constraints)),
         step_norm=step_norm,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
@@ -419,9 +425,12 @@ def solve_nonlinear_pendulum_with_multiple_shooting(
     raw_controls = jnp.arctanh(normalized)
     z0 = pack_variables(jnp.stack(states), raw_controls)
 
+    start_time = time.perf_counter()
     z_star, iterations, converged, step_norm = solve_sqp(
         z0, objective_fn, constraints_fn, unpack_fn, controls_fn, options
     )
+    jax.block_until_ready(z_star)
+    runtime_seconds = time.perf_counter() - start_time
     states_star, raw_controls_star = unpack_fn(z_star)
     controls_star = controls_fn(raw_controls_star)
     constraints = constraints_fn(z_star)
@@ -443,6 +452,7 @@ def solve_nonlinear_pendulum_with_multiple_shooting(
         converged=converged,
         iterations=iterations,
         objective_value=float(objective_fn(z_star)),
+        runtime_seconds=runtime_seconds,
         constraint_norm=float(jnp.linalg.norm(constraints)),
         step_norm=step_norm,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),

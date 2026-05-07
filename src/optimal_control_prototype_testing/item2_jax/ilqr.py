@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import jax
 import jax.numpy as jnp
@@ -39,6 +40,7 @@ class ILQRResult:
     converged: bool
     iterations: int
     objective_value: float
+    runtime_seconds: float
     control_update_norm: float
     max_control_violation: float
     max_state_violation: float
@@ -475,6 +477,7 @@ def solve_trivial_lqr_with_ilqr(
     terminal_cost_fn = lambda x: trivial_terminal_cost(problem, x)
     rollout_fn = lambda controls: rollout_trivial_controls(problem, controls, options)
 
+    start_time = time.perf_counter()
     controls_star, states_star, cost_star, update_norm, converged, iterations = ilqr_solve(
         initial_state,
         initial_controls,
@@ -486,6 +489,8 @@ def solve_trivial_lqr_with_ilqr(
         u_max,
         options,
     )
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     reference_step = linear_diffrax_step(
         problem,
         initial_state,
@@ -499,6 +504,7 @@ def solve_trivial_lqr_with_ilqr(
         converged=bool(converged),
         iterations=int(iterations),
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(violation))),
         max_state_violation=0.0,
@@ -533,6 +539,7 @@ def solve_nonlinear_pendulum_with_ilqr(
         problem, controls, options, soft_constraints=soft_constraints
     )
 
+    start_time = time.perf_counter()
     controls_star, states_star, cost_star, update_norm, converged, iterations = ilqr_solve(
         initial_state,
         initial_controls,
@@ -545,6 +552,8 @@ def solve_nonlinear_pendulum_with_ilqr(
         options,
         use_reverse_dynamics_jacobians=True,
     )
+    jax.block_until_ready(cost_star)
+    runtime_seconds = time.perf_counter() - start_time
     reference_step = nonlinear_diffrax_step(
         problem,
         initial_state,
@@ -563,6 +572,7 @@ def solve_nonlinear_pendulum_with_ilqr(
         converged=bool(converged),
         iterations=int(iterations),
         objective_value=float(cost_star),
+        runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),

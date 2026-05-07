@@ -155,6 +155,16 @@ or
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode soft
 ```
 
+For horizon-scaling tests, override the default horizon directly:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 20
+```
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 200
+```
+
 ## Google Colab
 
 To run item 3 on GPU in Google Colab:
@@ -195,6 +205,16 @@ To run the trivial benchmark in Colab instead:
 !PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem trivial
 ```
 
+To collect the testing metrics at the two planned horizons:
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 20
+```
+
+```python
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 200
+```
+
 Expected signs of a successful GPU run:
 
 - `backend: gpu`
@@ -217,7 +237,9 @@ The current runner prints:
 - separate results for the selected problem and mode
 - each result's `problem`
 - each result's `constraint_mode`
+- each method's `iterations`
 - each method's `objective`
+- each method's `runtime_seconds`
 - each method's `max_control_violation`
 - each method's `max_state_violation`
 - each method's `diffrax_vs_exact_step_error`
