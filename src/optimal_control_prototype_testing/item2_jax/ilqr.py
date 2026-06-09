@@ -12,10 +12,12 @@ from jax.scipy.linalg import expm
 from optimal_control_prototype_testing.item1_jax.problem import (
     TrivialLQRProblem,
     build_trivial_lqr_problem,
+    pure_tracking_cost as _lqr_pure_cost,
 )
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
 )
 
 
@@ -503,7 +505,7 @@ def solve_trivial_lqr_with_ilqr(
         constraint_mode="hard",
         converged=bool(converged),
         iterations=int(iterations),
-        objective_value=float(cost_star),
+        objective_value=_lqr_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(violation))),
@@ -571,7 +573,7 @@ def solve_nonlinear_pendulum_with_ilqr(
         constraint_mode="soft" if soft_constraints else "hard",
         converged=bool(converged),
         iterations=int(iterations),
-        objective_value=float(cost_star),
+        objective_value=_nl_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),

@@ -31,6 +31,20 @@ class TrivialLQRProblem:
         return self.final_time / self.horizon
 
 
+def pure_tracking_cost(
+    problem: TrivialLQRProblem,
+    states: np.ndarray,
+    controls: np.ndarray,
+) -> float:
+    cost = 0.0
+    for k in range(problem.horizon):
+        x = np.asarray(states[k], dtype=float)
+        u = np.asarray(controls[k], dtype=float)
+        cost += problem.dt * float(x @ problem.Q @ x + u @ problem.R @ u)
+    xN = np.asarray(states[-1], dtype=float)
+    return cost + float(xN @ problem.Qf @ xN)
+
+
 def build_trivial_lqr_problem() -> TrivialLQRProblem:
     return TrivialLQRProblem(
         A=np.array([[0.0, 1.0], [-0.25, -0.1]], dtype=float),

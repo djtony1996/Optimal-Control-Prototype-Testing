@@ -16,6 +16,7 @@ from optimal_control_prototype_testing.item1_jax.problem import (
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
 )
 
 
@@ -449,7 +450,7 @@ def solve_nonlinear_pendulum_with_mppi(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
         iterations=options.iterations,
-        objective_value=float(cost_star),
+        objective_value=_nl_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
@@ -516,7 +517,7 @@ def solve_nonlinear_pendulum_with_cem(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
         iterations=options.iterations,
-        objective_value=float(cost_star),
+        objective_value=_nl_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),

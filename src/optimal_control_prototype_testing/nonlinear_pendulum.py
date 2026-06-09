@@ -97,6 +97,18 @@ class NonlinearPendulumProblem:
         return cost
 
 
+def pure_tracking_cost(
+    problem: NonlinearPendulumProblem,
+    states: np.ndarray,
+    controls: np.ndarray,
+) -> float:
+    cost = sum(
+        problem.running_cost(states[k], controls[k])
+        for k in range(problem.horizon)
+    )
+    return float(cost + problem.terminal_cost(states[-1]))
+
+
 def build_nonlinear_pendulum_problem() -> NonlinearPendulumProblem:
     """Shared single-pendulum swing-up problem from page 6 of the project PDF.
 

@@ -13,6 +13,7 @@ from jax.scipy.linalg import expm
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
 )
 
 from .problem import TrivialLQRProblem, build_trivial_lqr_problem
@@ -451,7 +452,7 @@ def solve_nonlinear_pendulum_with_multiple_shooting(
         constraint_mode="soft" if soft_constraints else "hard",
         converged=converged,
         iterations=iterations,
-        objective_value=float(objective_fn(z_star)),
+        objective_value=_nl_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         constraint_norm=float(jnp.linalg.norm(constraints)),
         step_norm=step_norm,

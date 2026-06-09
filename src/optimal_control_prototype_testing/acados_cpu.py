@@ -8,7 +8,14 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from optimal_control_prototype_testing.nonlinear_pendulum import build_nonlinear_pendulum_problem
+from optimal_control_prototype_testing.item1_jax.problem import (
+    build_trivial_lqr_problem as _build_lqr_problem,
+    pure_tracking_cost as _lqr_pure_cost,
+)
+from optimal_control_prototype_testing.nonlinear_pendulum import (
+    build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
+)
 
 
 @dataclass(frozen=True)
@@ -261,19 +268,18 @@ def solve_trivial_lqr_with_acados(*, horizon: int = 20) -> AcadosBaselineResult:
     _, _, _, AcadosOcpSolver = _imports()
     ocp = build_trivial_lqr_ocp(horizon=horizon)
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
-    return _extract_result(
-        solver,
-        ocp,
-        problem_name="trivial_lqr",
-        constraint_mode="hard",
-    )
+    result = _extract_result(solver, ocp, problem_name="trivial_lqr", constraint_mode="hard")
+    if result.objective_value is not None:
+        lqr_problem = _build_lqr_problem(horizon=horizon)
+        result = replace(result, objective_value=_lqr_pure_cost(lqr_problem, result.state_trajectory, result.control_trajectory))
+    return result
 
 
 def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, horizon: int | None = None) -> AcadosBaselineResult:
     _, _, _, AcadosOcpSolver = _imports()
     ocp, problem = build_nonlinear_pendulum_ocp(soft_constraints=soft_constraints, horizon=horizon)
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
-    return _extract_result(
+    result = _extract_result(
         solver,
         ocp,
         problem_name="nonlinear_pendulum",
@@ -281,6 +287,9 @@ def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, horizon: int
         x_min=problem.x_min,
         x_max=problem.x_max,
     )
+    if result.objective_value is not None:
+        result = replace(result, objective_value=_nl_pure_cost(problem, result.state_trajectory, result.control_trajectory))
+    return result
 
 
 def format_result(result: AcadosBaselineResult) -> str:

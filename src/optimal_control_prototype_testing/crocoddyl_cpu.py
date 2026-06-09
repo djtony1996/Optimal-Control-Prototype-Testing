@@ -9,9 +9,14 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.linalg import expm
 
+from optimal_control_prototype_testing.item1_jax.problem import (
+    build_trivial_lqr_problem as _build_lqr_problem,
+    pure_tracking_cost as _lqr_pure_cost,
+)
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
     wrap_angle,
 )
 
@@ -249,13 +254,14 @@ def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineR
     u_lb = solver.problem.runningModels[0].u_lb
     u_ub = solver.problem.runningModels[0].u_ub
     violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
+    lqr_problem = _build_lqr_problem(horizon=horizon)
     return CrocoddylBaselineResult(
         problem_name="trivial_lqr",
         constraint_mode="hard",
         horizon=horizon,
         converged=converged,
         iterations=int(solver.iter),
-        objective_value=float(solver.cost),
+        objective_value=_lqr_pure_cost(lqr_problem, xs, us),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(violation))) if len(us) else 0.0,
         max_state_violation=0.0,
@@ -293,7 +299,7 @@ def solve_nonlinear_pendulum_with_crocoddyl(
         horizon=horizon,
         converged=converged,
         iterations=int(solver.iter),
-        objective_value=float(solver.cost),
+        objective_value=_nl_pure_cost(problem, xs, us),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(control_violation))) if len(us) else 0.0,
         max_state_violation=_state_violation(problem, xs),
