@@ -69,6 +69,8 @@ class MultipleShootingResult:
     step_norm: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     diffrax_vs_reference_step_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
@@ -325,6 +327,7 @@ def solve_trivial_lqr_with_multiple_shooting(
     reference_step = trivial_diffrax_step(problem, jnp.asarray(problem.x0, dtype=dtype), jnp.zeros(problem.nu, dtype=dtype))
     exact_step = Ad @ jnp.asarray(problem.x0, dtype=dtype) + Bd @ jnp.zeros(problem.nu, dtype=dtype)
     control_violation = jnp.maximum(controls_star - u_max, 0.0) + jnp.maximum(u_min - controls_star, 0.0)
+    final_state = np.asarray(states_star[-1])
     return MultipleShootingResult(
         problem_name="trivial_lqr",
         constraint_mode="hard",
@@ -336,6 +339,8 @@ def solve_trivial_lqr_with_multiple_shooting(
         step_norm=step_norm,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=0.0,
+        final_position_error=float(final_state[0]),
+        final_velocity_error=float(final_state[1]),
         diffrax_vs_reference_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),
@@ -447,6 +452,7 @@ def solve_nonlinear_pendulum_with_multiple_shooting(
     )
     control_violation = jnp.maximum(controls_star - u_max, 0.0) + jnp.maximum(u_min - controls_star, 0.0)
     state_violation_vals = jax.vmap(state_violation)(states_star)
+    final_error = problem.state_error(np.asarray(states_star[-1]))
     return MultipleShootingResult(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
@@ -458,6 +464,8 @@ def solve_nonlinear_pendulum_with_multiple_shooting(
         step_norm=step_norm,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation_vals))),
+        final_position_error=float(final_error[0]),
+        final_velocity_error=float(final_error[1]),
         diffrax_vs_reference_step_error=float(jnp.linalg.norm(reference_step - rk4_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),

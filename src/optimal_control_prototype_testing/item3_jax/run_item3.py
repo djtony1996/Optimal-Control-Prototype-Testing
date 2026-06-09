@@ -25,6 +25,8 @@ def print_result(label: str, result) -> None:
     print(f"  runtime_seconds: {result.runtime_seconds:.6f}")
     print(f"  max_control_violation: {result.max_control_violation:.3e}")
     print(f"  max_state_violation: {result.max_state_violation:.3e}")
+    print(f"  final_position_error: {result.final_position_error:.6f}")
+    print(f"  final_velocity_error: {result.final_velocity_error:.6f}")
     print(f"  diffrax_vs_exact_step_error: {result.diffrax_vs_exact_step_error:.3e}")
     print(
         "  state_trajectory:\n"

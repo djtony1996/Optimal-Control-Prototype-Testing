@@ -43,6 +43,8 @@ class SamplingResult:
     runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     diffrax_vs_exact_step_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
@@ -318,6 +320,7 @@ def solve_trivial_lqr_with_mppi(
     control_violation = jnp.maximum(
         controls_star - jnp.asarray(problem.u_max, dtype=dtype), 0.0
     ) + jnp.maximum(jnp.asarray(problem.u_min, dtype=dtype) - controls_star, 0.0)
+    final_state_mppi_lqr = np.asarray(states_star[-1])
     return SamplingResult(
         method="mppi",
         problem_name="trivial_lqr",
@@ -327,6 +330,8 @@ def solve_trivial_lqr_with_mppi(
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=0.0,
+        final_position_error=float(final_state_mppi_lqr[0]),
+        final_velocity_error=float(final_state_mppi_lqr[1]),
         diffrax_vs_exact_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),
@@ -384,6 +389,7 @@ def solve_trivial_lqr_with_cem(
     control_violation = jnp.maximum(
         controls_star - jnp.asarray(problem.u_max, dtype=dtype), 0.0
     ) + jnp.maximum(jnp.asarray(problem.u_min, dtype=dtype) - controls_star, 0.0)
+    final_state_cem_lqr = np.asarray(states_star[-1])
     return SamplingResult(
         method="cem",
         problem_name="trivial_lqr",
@@ -393,6 +399,8 @@ def solve_trivial_lqr_with_cem(
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=0.0,
+        final_position_error=float(final_state_cem_lqr[0]),
+        final_velocity_error=float(final_state_cem_lqr[1]),
         diffrax_vs_exact_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),
@@ -445,6 +453,7 @@ def solve_nonlinear_pendulum_with_mppi(
         jnp.asarray(problem.x0, dtype=dtype),
         jnp.zeros(problem.nu, dtype=dtype),
     )
+    final_error_mppi = problem.state_error(np.asarray(states_star[-1]))
     return SamplingResult(
         method="mppi",
         problem_name="nonlinear_pendulum",
@@ -454,6 +463,8 @@ def solve_nonlinear_pendulum_with_mppi(
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
+        final_position_error=float(final_error_mppi[0]),
+        final_velocity_error=float(final_error_mppi[1]),
         diffrax_vs_exact_step_error=0.0 * float(jnp.linalg.norm(reference_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),
@@ -512,6 +523,7 @@ def solve_nonlinear_pendulum_with_cem(
         jnp.asarray(problem.x0, dtype=dtype),
         jnp.zeros(problem.nu, dtype=dtype),
     )
+    final_error_cem = problem.state_error(np.asarray(states_star[-1]))
     return SamplingResult(
         method="cem",
         problem_name="nonlinear_pendulum",
@@ -521,6 +533,8 @@ def solve_nonlinear_pendulum_with_cem(
         runtime_seconds=runtime_seconds,
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
+        final_position_error=float(final_error_cem[0]),
+        final_velocity_error=float(final_error_cem[1]),
         diffrax_vs_exact_step_error=0.0 * float(jnp.linalg.norm(reference_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),

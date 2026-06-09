@@ -29,6 +29,8 @@ class AcadosBaselineResult:
     runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
 
@@ -259,6 +261,8 @@ def _extract_result(solver, ocp, *, problem_name: str, constraint_mode: str, x_m
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(control_violation))) if len(sim_u) else 0.0,
         max_state_violation=max_state_violation,
+        final_position_error=0.0,
+        final_velocity_error=0.0,
         state_trajectory=sim_x,
         control_trajectory=sim_u,
     )
@@ -269,10 +273,15 @@ def solve_trivial_lqr_with_acados(*, horizon: int = 20) -> AcadosBaselineResult:
     ocp = build_trivial_lqr_ocp(horizon=horizon)
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
     result = _extract_result(solver, ocp, problem_name="trivial_lqr", constraint_mode="hard")
+    lqr_problem = _build_lqr_problem(horizon=horizon)
+    final_state = result.state_trajectory[-1]
+    updates = dict(
+        final_position_error=float(final_state[0]),
+        final_velocity_error=float(final_state[1]),
+    )
     if result.objective_value is not None:
-        lqr_problem = _build_lqr_problem(horizon=horizon)
-        result = replace(result, objective_value=_lqr_pure_cost(lqr_problem, result.state_trajectory, result.control_trajectory))
-    return result
+        updates["objective_value"] = _lqr_pure_cost(lqr_problem, result.state_trajectory, result.control_trajectory)
+    return replace(result, **updates)
 
 
 def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, horizon: int | None = None) -> AcadosBaselineResult:
@@ -287,9 +296,14 @@ def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, horizon: int
         x_min=problem.x_min,
         x_max=problem.x_max,
     )
+    final_error = problem.state_error(result.state_trajectory[-1])
+    updates = dict(
+        final_position_error=float(final_error[0]),
+        final_velocity_error=float(final_error[1]),
+    )
     if result.objective_value is not None:
-        result = replace(result, objective_value=_nl_pure_cost(problem, result.state_trajectory, result.control_trajectory))
-    return result
+        updates["objective_value"] = _nl_pure_cost(problem, result.state_trajectory, result.control_trajectory)
+    return replace(result, **updates)
 
 
 def format_result(result: AcadosBaselineResult) -> str:
@@ -312,6 +326,8 @@ def format_result(result: AcadosBaselineResult) -> str:
         f"  runtime_seconds: {result.runtime_seconds:.6f}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
         f"  max_state_violation: {result.max_state_violation:.3e}\n"
+        f"  final_position_error: {result.final_position_error:.6f}\n"
+        f"  final_velocity_error: {result.final_velocity_error:.6f}\n"
         f"  first_control: {first_control}\n"
         f"  final_state: {final_state}\n"
         f"  state_trajectory:\n{state_trajectory}\n"

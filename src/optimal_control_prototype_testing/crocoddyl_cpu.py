@@ -32,6 +32,8 @@ class CrocoddylBaselineResult:
     runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
 
@@ -255,6 +257,7 @@ def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineR
     u_ub = solver.problem.runningModels[0].u_ub
     violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
     lqr_problem = _build_lqr_problem(horizon=horizon)
+    final_state_lqr = xs[-1]
     return CrocoddylBaselineResult(
         problem_name="trivial_lqr",
         constraint_mode="hard",
@@ -265,6 +268,8 @@ def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineR
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(violation))) if len(us) else 0.0,
         max_state_violation=0.0,
+        final_position_error=float(final_state_lqr[0]),
+        final_velocity_error=float(final_state_lqr[1]),
         state_trajectory=xs,
         control_trajectory=us,
     )
@@ -293,6 +298,7 @@ def solve_nonlinear_pendulum_with_crocoddyl(
         u_lb = solver.problem.runningModels[0].u_lb
         u_ub = solver.problem.runningModels[0].u_ub
         control_violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
+    final_error_nl = problem.state_error(xs[-1])
     return CrocoddylBaselineResult(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
@@ -303,6 +309,8 @@ def solve_nonlinear_pendulum_with_crocoddyl(
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(control_violation))) if len(us) else 0.0,
         max_state_violation=_state_violation(problem, xs),
+        final_position_error=float(final_error_nl[0]),
+        final_velocity_error=float(final_error_nl[1]),
         state_trajectory=xs,
         control_trajectory=us,
     )
@@ -328,6 +336,8 @@ def format_result(result: CrocoddylBaselineResult) -> str:
         f"  runtime_seconds: {result.runtime_seconds:.6f}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
         f"  max_state_violation: {result.max_state_violation:.3e}\n"
+        f"  final_position_error: {result.final_position_error:.6f}\n"
+        f"  final_velocity_error: {result.final_velocity_error:.6f}\n"
         f"  first_control: {first_control}\n"
         f"  final_state: {final_state}\n"
         f"  state_trajectory:\n{state_trajectory}\n"
