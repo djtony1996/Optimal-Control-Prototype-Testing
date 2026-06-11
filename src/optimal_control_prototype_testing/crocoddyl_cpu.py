@@ -9,9 +9,14 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.linalg import expm
 
+from optimal_control_prototype_testing.item1_jax.problem import (
+    build_trivial_lqr_problem as _build_lqr_problem,
+    pure_tracking_cost as _lqr_pure_cost,
+)
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
     wrap_angle,
 )
 
@@ -27,6 +32,8 @@ class CrocoddylBaselineResult:
     runtime_seconds: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
 
@@ -146,13 +153,13 @@ class PendulumActionModel:
         raise NotImplementedError("Use ActionModelNumDiff for the nonlinear pendulum model.")
 
 
-def build_trivial_lqr_problem(*, horizon: int = 20):
+def build_trivial_lqr_problem(*, dt: float = 0.1):
     crocoddyl = _import_crocoddyl()
 
     nx = 2
     nu = 1
     final_time = 2.0
-    dt = final_time / horizon
+    horizon = int(round(final_time / dt))
 
     A = np.array([[0.0, 1.0], [-0.25, -0.1]], dtype=float)
     B = np.array([[0.0], [1.0]], dtype=float)
@@ -203,12 +210,15 @@ def build_trivial_lqr_problem(*, horizon: int = 20):
 def build_nonlinear_pendulum_solver(
     *,
     soft_constraints: bool,
-    horizon: int | None = None,
+    dt: float | None = None,
+    final_time: float | None = None,
 ) -> tuple[object, NonlinearPendulumProblem]:
     crocoddyl = _import_crocoddyl()
     problem = build_nonlinear_pendulum_problem()
-    if horizon is not None:
-        problem = replace(problem, horizon=horizon)
+    if dt is not None:
+        problem = replace(problem, dt=dt)
+    if final_time is not None:
+        problem = replace(problem, final_time=final_time)
 
     class RunningPendulumModel(PendulumActionModel, crocoddyl.ActionModelAbstract):
         pass
@@ -236,8 +246,8 @@ def _state_violation(problem: NonlinearPendulumProblem, xs: np.ndarray) -> float
     return float(np.max(np.abs(lower + upper)))
 
 
-def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineResult:
-    solver, x0 = build_trivial_lqr_problem(horizon=horizon)
+def solve_trivial_lqr_with_crocoddyl(*, dt: float = 0.1) -> CrocoddylBaselineResult:
+    solver, x0 = build_trivial_lqr_problem(dt=dt)
     horizon = solver.problem.T
     xs_init = [x0.copy() for _ in range(horizon + 1)]
     us_init = [np.zeros(solver.problem.runningModels[0].nu) for _ in range(horizon)]
@@ -249,16 +259,20 @@ def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineR
     u_lb = solver.problem.runningModels[0].u_lb
     u_ub = solver.problem.runningModels[0].u_ub
     violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
+    lqr_problem = replace(_build_lqr_problem(), dt=dt)
+    final_state_lqr = xs[-1]
     return CrocoddylBaselineResult(
         problem_name="trivial_lqr",
         constraint_mode="hard",
         horizon=horizon,
         converged=converged,
         iterations=int(solver.iter),
-        objective_value=float(solver.cost),
+        objective_value=_lqr_pure_cost(lqr_problem, xs, us),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(violation))) if len(us) else 0.0,
         max_state_violation=0.0,
+        final_position_error=float(final_state_lqr[0]),
+        final_velocity_error=float(final_state_lqr[1]),
         state_trajectory=xs,
         control_trajectory=us,
     )
@@ -267,9 +281,10 @@ def solve_trivial_lqr_with_crocoddyl(*, horizon: int = 20) -> CrocoddylBaselineR
 def solve_nonlinear_pendulum_with_crocoddyl(
     *,
     soft_constraints: bool,
-    horizon: int | None = None,
+    dt: float | None = None,
+    final_time: float | None = None,
 ) -> CrocoddylBaselineResult:
-    solver, problem = build_nonlinear_pendulum_solver(soft_constraints=soft_constraints, horizon=horizon)
+    solver, problem = build_nonlinear_pendulum_solver(soft_constraints=soft_constraints, dt=dt, final_time=final_time)
     horizon = solver.problem.T
     xs_init = [problem.x0.copy() for _ in range(horizon + 1)]
     us_init = [np.zeros(solver.problem.runningModels[0].nu) for _ in range(horizon)]
@@ -287,16 +302,19 @@ def solve_nonlinear_pendulum_with_crocoddyl(
         u_lb = solver.problem.runningModels[0].u_lb
         u_ub = solver.problem.runningModels[0].u_ub
         control_violation = np.maximum(us - u_ub, 0.0) + np.maximum(u_lb - us, 0.0)
+    final_error_nl = problem.state_error(xs[-1])
     return CrocoddylBaselineResult(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
         horizon=horizon,
         converged=converged,
         iterations=int(solver.iter),
-        objective_value=float(solver.cost),
+        objective_value=_nl_pure_cost(problem, xs, us),
         runtime_seconds=runtime_seconds,
         max_control_violation=float(np.max(np.abs(control_violation))) if len(us) else 0.0,
         max_state_violation=_state_violation(problem, xs),
+        final_position_error=float(final_error_nl[0]),
+        final_velocity_error=float(final_error_nl[1]),
         state_trajectory=xs,
         control_trajectory=us,
     )
@@ -322,6 +340,8 @@ def format_result(result: CrocoddylBaselineResult) -> str:
         f"  runtime_seconds: {result.runtime_seconds:.6f}\n"
         f"  max_control_violation: {result.max_control_violation:.3e}\n"
         f"  max_state_violation: {result.max_state_violation:.3e}\n"
+        f"  final_position_error: {result.final_position_error:.6f}\n"
+        f"  final_velocity_error: {result.final_velocity_error:.6f}\n"
         f"  first_control: {first_control}\n"
         f"  final_state: {final_state}\n"
         f"  state_trajectory:\n{state_trajectory}\n"
@@ -344,10 +364,16 @@ def parse_args() -> argparse.Namespace:
         help="Constraint handling mode for the nonlinear pendulum benchmark.",
     )
     parser.add_argument(
-        "--horizon",
-        type=int,
-        default=20,
-        help="Horizon length N to use for the selected benchmark.",
+        "--dt",
+        type=float,
+        default=None,
+        help="Override time step dt.",
+    )
+    parser.add_argument(
+        "--final-time",
+        type=float,
+        default=None,
+        help="Override total time.",
     )
     return parser.parse_args()
 
@@ -355,7 +381,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.problem == "trivial":
-        print(format_result(solve_trivial_lqr_with_crocoddyl(horizon=args.horizon)))
+        kwargs = {}
+        if args.dt is not None:
+            kwargs["dt"] = args.dt
+        print(format_result(solve_trivial_lqr_with_crocoddyl(**kwargs)))
         return
 
     results = []
@@ -363,14 +392,16 @@ def main() -> None:
         results.append(
             solve_nonlinear_pendulum_with_crocoddyl(
                 soft_constraints=False,
-                horizon=args.horizon,
+                dt=args.dt,
+                final_time=args.final_time,
             )
         )
     if args.constraint_mode in ("soft", "both"):
         results.append(
             solve_nonlinear_pendulum_with_crocoddyl(
                 soft_constraints=True,
-                horizon=args.horizon,
+                dt=args.dt,
+                final_time=args.final_time,
             )
         )
     for index, result in enumerate(results):

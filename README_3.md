@@ -18,7 +18,7 @@ The trivial benchmark uses the same finite-horizon `LQR` setup as items 1, 2,
 
 - state dimension: `x in R^2`
 - control dimension: `u in R`
-- horizon length: `N = 20`
+- time step: `dt = 0.1`
 - final time: `T = 2.0`
 - initial state: `x0 = [1.5, 0.0]`
 - hard control bounds: `-0.75 <= u_k <= 0.75`
@@ -52,7 +52,7 @@ of the project PDF.
 
 - state dimension: `x = (theta, theta_dot) in R^2`
 - control dimension: `u in R`
-- horizon length: `N = 40`
+- time step: `dt = 0.1`
 - final time: `T = 4.0`
 - initial state: `x0 = [0.0, 0.0]`
 - target state: `x_goal = [pi, 0.0]`
@@ -155,14 +155,31 @@ or
 PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode soft
 ```
 
-For horizon-scaling tests, override the default horizon directly:
+## CLI Parameters
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--problem` | `trivial` \| `nonlinear` | `nonlinear` | Which benchmark to run |
+| `--constraint-mode` | `hard` \| `soft` \| `both` | `both` | Constraint handling (nonlinear only) |
+| `--dt` | float | `0.1` | Time step size |
+| `--final-time` | float | `2.0` (trivial) / `4.0` (nonlinear) | Total horizon time |
+
+To use a finer time step:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 20
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --dt 0.05
 ```
 
+To run with a longer total time (useful when the solver needs more time to reach the goal):
+
 ```bash
-PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 200
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --final-time 8.0
+```
+
+Both flags can be combined:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --dt 0.05 --final-time 6.0
 ```
 
 ## Google Colab
@@ -205,14 +222,16 @@ To run the trivial benchmark in Colab instead:
 !PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem trivial
 ```
 
-To collect the testing metrics at the two planned horizons:
+To run with a finer time step:
 
 ```python
-!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 20
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --dt 0.05
 ```
 
+To run with a longer total time:
+
 ```python
-!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --horizon 200
+!PYTHONPATH=src python -m optimal_control_prototype_testing.item3_jax.run_item3 --problem nonlinear --constraint-mode hard --final-time 8.0
 ```
 
 Expected signs of a successful GPU run:

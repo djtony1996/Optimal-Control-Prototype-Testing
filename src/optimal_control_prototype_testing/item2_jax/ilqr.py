@@ -12,10 +12,12 @@ from jax.scipy.linalg import expm
 from optimal_control_prototype_testing.item1_jax.problem import (
     TrivialLQRProblem,
     build_trivial_lqr_problem,
+    pure_tracking_cost as _lqr_pure_cost,
 )
 from optimal_control_prototype_testing.nonlinear_pendulum import (
     NonlinearPendulumProblem,
     build_nonlinear_pendulum_problem,
+    pure_tracking_cost as _nl_pure_cost,
 )
 
 
@@ -44,6 +46,8 @@ class ILQRResult:
     control_update_norm: float
     max_control_violation: float
     max_state_violation: float
+    final_position_error: float
+    final_velocity_error: float
     diffrax_vs_reference_step_error: float
     state_trajectory: np.ndarray
     control_trajectory: np.ndarray
@@ -498,16 +502,19 @@ def solve_trivial_lqr_with_ilqr(
     )
     exact_step = Ad @ initial_state + Bd @ jnp.zeros(problem.nu, dtype=dtype)
     violation = jnp.maximum(controls_star - u_max, 0.0) + jnp.maximum(u_min - controls_star, 0.0)
+    final_state = np.asarray(states_star[-1])
     return ILQRResult(
         problem_name="trivial_lqr",
         constraint_mode="hard",
         converged=bool(converged),
         iterations=int(iterations),
-        objective_value=float(cost_star),
+        objective_value=_lqr_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(violation))),
         max_state_violation=0.0,
+        final_position_error=float(final_state[0]),
+        final_velocity_error=float(final_state[1]),
         diffrax_vs_reference_step_error=float(jnp.linalg.norm(reference_step - exact_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),
@@ -566,16 +573,19 @@ def solve_nonlinear_pendulum_with_ilqr(
     state_violation = jax.vmap(
         lambda x: jnp.maximum(lower_x - x, 0.0) + jnp.maximum(x - upper_x, 0.0)
     )(states_star)
+    final_error = problem.state_error(np.asarray(states_star[-1]))
     return ILQRResult(
         problem_name="nonlinear_pendulum",
         constraint_mode="soft" if soft_constraints else "hard",
         converged=bool(converged),
         iterations=int(iterations),
-        objective_value=float(cost_star),
+        objective_value=_nl_pure_cost(problem, np.asarray(states_star), np.asarray(controls_star)),
         runtime_seconds=runtime_seconds,
         control_update_norm=float(update_norm),
         max_control_violation=float(jnp.max(jnp.abs(control_violation))),
         max_state_violation=float(jnp.max(jnp.abs(state_violation))),
+        final_position_error=float(final_error[0]),
+        final_velocity_error=float(final_error[1]),
         diffrax_vs_reference_step_error=float(jnp.linalg.norm(reference_step - rk4_step)),
         state_trajectory=np.asarray(states_star),
         control_trajectory=np.asarray(controls_star),

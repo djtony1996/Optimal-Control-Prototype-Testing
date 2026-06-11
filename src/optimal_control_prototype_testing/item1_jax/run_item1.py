@@ -53,10 +53,16 @@ def parse_args() -> argparse.Namespace:
         help="Constraint handling mode for the nonlinear pendulum benchmark.",
     )
     parser.add_argument(
-        "--horizon",
-        type=int,
+        "--dt",
+        type=float,
         default=None,
-        help="Override the default horizon length for testing.",
+        help="Override time step dt.",
+    )
+    parser.add_argument(
+        "--final-time",
+        type=float,
+        default=None,
+        help="Override total time.",
     )
     return parser.parse_args()
 
@@ -72,6 +78,8 @@ def print_result(result) -> None:
     print(f"  step_norm: {result.step_norm:.3e}")
     print(f"  max_control_violation: {result.max_control_violation:.3e}")
     print(f"  max_state_violation: {result.max_state_violation:.3e}")
+    print(f"  final_position_error: {result.final_position_error:.6f}")
+    print(f"  final_velocity_error: {result.final_velocity_error:.6f}")
     print(f"  diffrax_vs_reference_step_error: {result.diffrax_vs_reference_step_error:.3e}")
     print(
         "  state_trajectory:\n"
@@ -88,13 +96,17 @@ def main() -> None:
     environment = detect_jax_environment()
     if args.problem == "trivial":
         problem = build_trivial_lqr_problem()
-        if args.horizon is not None:
-            problem = replace(problem, horizon=args.horizon)
+        if args.dt is not None:
+            problem = replace(problem, dt=args.dt)
+        if args.final_time is not None:
+            problem = replace(problem, final_time=args.final_time)
         results = [solve_trivial_lqr_with_multiple_shooting(problem)]
     else:
         problem = build_nonlinear_pendulum_problem()
-        if args.horizon is not None:
-            problem = replace(problem, horizon=args.horizon)
+        if args.dt is not None:
+            problem = replace(problem, dt=args.dt)
+        if args.final_time is not None:
+            problem = replace(problem, final_time=args.final_time)
         results = []
         if args.constraint_mode in ("hard", "both"):
             results.append(solve_nonlinear_pendulum_with_multiple_shooting(problem, soft_constraints=False))

@@ -15,7 +15,7 @@ class TrivialLQRProblem:
     x0: np.ndarray
     u_min: np.ndarray
     u_max: np.ndarray
-    horizon: int
+    dt: float
     final_time: float
 
     @property
@@ -27,8 +27,22 @@ class TrivialLQRProblem:
         return int(self.B.shape[1])
 
     @property
-    def dt(self) -> float:
-        return self.final_time / self.horizon
+    def horizon(self) -> int:
+        return int(round(self.final_time / self.dt))
+
+
+def pure_tracking_cost(
+    problem: TrivialLQRProblem,
+    states: np.ndarray,
+    controls: np.ndarray,
+) -> float:
+    cost = 0.0
+    for k in range(problem.horizon):
+        x = np.asarray(states[k], dtype=float)
+        u = np.asarray(controls[k], dtype=float)
+        cost += problem.dt * float(x @ problem.Q @ x + u @ problem.R @ u)
+    xN = np.asarray(states[-1], dtype=float)
+    return cost + float(xN @ problem.Qf @ xN)
 
 
 def build_trivial_lqr_problem() -> TrivialLQRProblem:
@@ -41,6 +55,6 @@ def build_trivial_lqr_problem() -> TrivialLQRProblem:
         x0=np.array([1.5, 0.0], dtype=float),
         u_min=np.array([-0.75], dtype=float),
         u_max=np.array([0.75], dtype=float),
-        horizon=20,
+        dt=0.1,
         final_time=2.0,
     )

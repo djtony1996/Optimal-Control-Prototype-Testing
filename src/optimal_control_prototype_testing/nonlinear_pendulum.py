@@ -26,7 +26,7 @@ class NonlinearPendulumProblem:
     Qf: np.ndarray
     state_soft_weight: float
     control_soft_weight: float
-    horizon: int
+    dt: float
     final_time: float
 
     @property
@@ -38,8 +38,8 @@ class NonlinearPendulumProblem:
         return int(self.u_min.shape[0])
 
     @property
-    def dt(self) -> float:
-        return self.final_time / self.horizon
+    def horizon(self) -> int:
+        return int(round(self.final_time / self.dt))
 
     @property
     def inertia(self) -> float:
@@ -97,6 +97,18 @@ class NonlinearPendulumProblem:
         return cost
 
 
+def pure_tracking_cost(
+    problem: NonlinearPendulumProblem,
+    states: np.ndarray,
+    controls: np.ndarray,
+) -> float:
+    cost = sum(
+        problem.running_cost(states[k], controls[k])
+        for k in range(problem.horizon)
+    )
+    return float(cost + problem.terminal_cost(states[-1]))
+
+
 def build_nonlinear_pendulum_problem() -> NonlinearPendulumProblem:
     """Shared single-pendulum swing-up problem from page 6 of the project PDF.
 
@@ -122,6 +134,6 @@ def build_nonlinear_pendulum_problem() -> NonlinearPendulumProblem:
         Qf=np.diag([25.0, 2.0]),
         state_soft_weight=50.0,
         control_soft_weight=50.0,
-        horizon=40,
+        dt=0.1,
         final_time=4.0,
     )
