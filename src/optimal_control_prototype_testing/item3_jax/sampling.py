@@ -25,11 +25,11 @@ Array = jax.Array
 
 @dataclass(frozen=True)
 class SamplingOptions:
-    num_rollouts: int = 512
-    iterations: int = 20
-    noise_std: float = 0.25
+    num_rollouts: int = 2048
+    iterations: int = 100
+    noise_std: float = 5.0
     temperature: float = 1.0
-    elite_fraction: float = 0.1
+    elite_fraction: float = 0.05
     seed: int = 0
 
 
