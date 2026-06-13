@@ -170,16 +170,20 @@ def build_trivial_lqr_problem(*, dt: float = 0.1):
     q = np.zeros(nx, dtype=float)
     r = np.zeros(nu, dtype=float)
 
+    # ActionModelLQR computes 0.5*(x'Qx + u'Ru); scale by 2*dt to match
+    # the intended running cost dt*(x'Qx + u'Ru) from pure_tracking_cost.
     running_model = crocoddyl.ActionModelLQR(nx, nu, False)
-    running_model.setLQR(Ad, Bd, p.Q, p.R, N_cross, G, H, f, q, r, g, h)
+    running_model.setLQR(Ad, Bd, 2.0 * p.dt * p.Q, 2.0 * p.dt * p.R, N_cross, G, H, f, q, r, g, h)
     running_model.u_lb = p.u_min.copy()
     running_model.u_ub = p.u_max.copy()
 
+    # Scale Qf by 2 to match the intended terminal cost x_N'Qf x_N
+    # (ActionModelLQR applies a 0.5 factor).
     terminal_model = crocoddyl.ActionModelLQR(nx, 0, False)
     terminal_model.setLQR(
         np.eye(nx),
         np.zeros((nx, 0), dtype=float),
-        p.Qf,
+        2.0 * p.Qf,
         np.zeros((0, 0), dtype=float),
         np.zeros((nx, 0), dtype=float),
         np.zeros((0, nx), dtype=float),
