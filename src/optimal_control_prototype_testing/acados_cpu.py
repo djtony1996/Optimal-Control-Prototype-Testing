@@ -126,13 +126,32 @@ def build_trivial_lqr_ocp(*, dt: float = 0.1):
     return ocp
 
 
-def build_nonlinear_pendulum_ocp(*, soft_constraints: bool, dt: float | None = None, final_time: float | None = None):
+def build_nonlinear_pendulum_ocp(
+    *,
+    soft_constraints: bool,
+    dt: float | None = None,
+    final_time: float | None = None,
+    u_max: float | None = None,
+    Q: np.ndarray | None = None,
+    R: np.ndarray | None = None,
+    Qf: np.ndarray | None = None,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+):
     ca, AcadosModel, AcadosOcp, _ = _imports()
     problem = build_nonlinear_pendulum_problem()
     if dt is not None:
         problem = replace(problem, dt=dt)
     if final_time is not None:
         problem = replace(problem, final_time=final_time)
+    if u_max is not None:
+        problem = replace(problem, u_max=np.array([u_max]), u_min=np.array([-u_max]))
+    if Q is not None:
+        problem = replace(problem, Q=Q)
+    if R is not None:
+        problem = replace(problem, R=R)
+    if Qf is not None:
+        problem = replace(problem, Qf=Qf)
     nx = problem.nx
     nu = problem.nu
 
@@ -213,6 +232,11 @@ def build_nonlinear_pendulum_ocp(*, soft_constraints: bool, dt: float | None = N
     ocp.solver_options.integrator_type = "ERK"
     ocp.solver_options.nlp_solver_type = "SQP"
     ocp.solver_options.globalization = "MERIT_BACKTRACKING"
+    ocp.solver_options.nlp_solver_max_iter = max_iter
+    ocp.solver_options.nlp_solver_tol_stat = tol
+    ocp.solver_options.nlp_solver_tol_eq = tol
+    ocp.solver_options.nlp_solver_tol_ineq = tol
+    ocp.solver_options.nlp_solver_tol_comp = tol
 
     return ocp, problem
 
@@ -287,9 +311,30 @@ def solve_trivial_lqr_with_acados(*, dt: float = 0.1) -> AcadosBaselineResult:
     return replace(result, **updates)
 
 
-def solve_nonlinear_pendulum_with_acados(*, soft_constraints: bool, dt: float | None = None, final_time: float | None = None) -> AcadosBaselineResult:
+def solve_nonlinear_pendulum_with_acados(
+    *,
+    soft_constraints: bool,
+    dt: float | None = None,
+    final_time: float | None = None,
+    u_max: float | None = None,
+    Q: np.ndarray | None = None,
+    R: np.ndarray | None = None,
+    Qf: np.ndarray | None = None,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+) -> AcadosBaselineResult:
     _, _, _, AcadosOcpSolver = _imports()
-    ocp, problem = build_nonlinear_pendulum_ocp(soft_constraints=soft_constraints, dt=dt, final_time=final_time)
+    ocp, problem = build_nonlinear_pendulum_ocp(
+        soft_constraints=soft_constraints,
+        dt=dt,
+        final_time=final_time,
+        u_max=u_max,
+        Q=Q,
+        R=R,
+        Qf=Qf,
+        max_iter=max_iter,
+        tol=tol,
+    )
     solver = AcadosOcpSolver(ocp, json_file=ocp.code_gen_opts.json_file)
     result = _extract_result(
         solver,

@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Prototype implementations for the five optimal control benchmark items"
 readme = "README_4.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pandas>=3.0.3",
+    "streamlit>=1.58.0",
+]
 
 [project.scripts]
 optimal-control-item1-jax = "optimal_control_prototype_testing.item1_jax.run_item1:main"
