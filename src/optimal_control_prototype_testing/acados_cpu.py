@@ -7,8 +7,9 @@ import time
 from dataclasses import dataclass, replace
 
 import numpy as np
+from scipy.linalg import expm
 
-from optimal_control_prototype_testing.item1_jax.problem import (
+from optimal_control_prototype_testing.linear_trivial_LQR import (
     build_trivial_lqr_problem as _build_lqr_problem,
     pure_tracking_cost as _lqr_pure_cost,
 )
@@ -69,57 +70,56 @@ def _imports():
     return ca, AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
+def _zoh_discretize(A: np.ndarray, B: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndarray]:
+    nx, nu = A.shape[0], B.shape[1]
+    block = np.zeros((nx + nu, nx + nu), dtype=float)
+    block[:nx, :nx] = A
+    block[:nx, nx:] = B
+    transition = expm(block * dt)
+    return transition[:nx, :nx], transition[:nx, nx:]
+
+
 def build_trivial_lqr_ocp(*, dt: float = 0.1):
     ca, AcadosModel, AcadosOcp, _ = _imports()
 
-    nx = 2
-    nu = 1
-    final_time = 2.0
-    horizon = int(round(final_time / dt))
+    p = replace(_build_lqr_problem(), dt=dt)
+    nx, nu = p.nx, p.nu
 
-    A = np.array([[0.0, 1.0], [-0.25, -0.1]])
-    B = np.array([[0.0], [1.0]])
-    Q = np.diag([1.0, 0.2])
-    R = np.diag([0.05])
-    Qf = np.diag([8.0, 1.0])
-    x_init = np.array([1.5, 0.0])
-    u_min = np.array([-0.75])
-    u_max = np.array([0.75])
+    Ad, Bd = _zoh_discretize(p.A, p.B, p.dt)
 
     model = AcadosModel()
     model.name = "trivial_lqr_acados"
     model.x = ca.SX.sym("x", nx)
     model.u = ca.SX.sym("u", nu)
-    model.xdot = ca.SX.sym("xdot", nx)
-    model.f_expl_expr = ca.mtimes(ca.DM(A), model.x) + ca.mtimes(ca.DM(B), model.u)
-    model.f_impl_expr = model.xdot - model.f_expl_expr
+    # exact ZOH discrete-time dynamics (matrix exponential)
+    model.disc_dyn_expr = ca.DM(Ad) @ model.x + ca.DM(Bd) @ model.u
 
     ocp = AcadosOcp()
     ocp.model = model
     ocp.code_gen_opts.code_export_directory = "/tmp/acados_item4_generated_code_trivial"
     ocp.code_gen_opts.json_file = "/tmp/trivial_lqr_acados_ocp.json"
 
-    ocp.solver_options.N_horizon = horizon
-    ocp.solver_options.tf = final_time
+    ocp.solver_options.N_horizon = p.horizon
+    ocp.solver_options.tf = p.final_time
 
     ocp.cost.cost_type = "LINEAR_LS"
     ocp.cost.cost_type_e = "LINEAR_LS"
-    ocp.cost.W = np.block([[Q, np.zeros((nx, nu))], [np.zeros((nu, nx)), R]])
-    ocp.cost.W_e = Qf
+    ocp.cost.W = np.block([[p.Q, np.zeros((nx, nu))], [np.zeros((nu, nx)), p.R]])
+    ocp.cost.W_e = p.Qf
     ocp.cost.Vx = np.vstack([np.eye(nx), np.zeros((nu, nx))])
     ocp.cost.Vu = np.vstack([np.zeros((nx, nu)), np.eye(nu)])
     ocp.cost.Vx_e = np.eye(nx)
     ocp.cost.yref = np.zeros(nx + nu)
     ocp.cost.yref_e = np.zeros(nx)
 
-    ocp.constraints.x0 = x_init
-    ocp.constraints.lbu = u_min
-    ocp.constraints.ubu = u_max
+    ocp.constraints.x0 = p.x0.copy()
+    ocp.constraints.lbu = p.u_min.copy()
+    ocp.constraints.ubu = p.u_max.copy()
     ocp.constraints.idxbu = np.array([0])
 
     ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
     ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
-    ocp.solver_options.integrator_type = "ERK"
+    ocp.solver_options.integrator_type = "DISCRETE"
     ocp.solver_options.nlp_solver_type = "SQP"
     ocp.solver_options.globalization = "MERIT_BACKTRACKING"
 

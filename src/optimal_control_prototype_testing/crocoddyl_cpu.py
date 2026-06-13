@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.linalg import expm
 
-from optimal_control_prototype_testing.item1_jax.problem import (
+from optimal_control_prototype_testing.linear_trivial_LQR import (
     build_trivial_lqr_problem as _build_lqr_problem,
     pure_tracking_cost as _lqr_pure_cost,
 )
@@ -156,23 +156,12 @@ class PendulumActionModel:
 def build_trivial_lqr_problem(*, dt: float = 0.1):
     crocoddyl = _import_crocoddyl()
 
-    nx = 2
-    nu = 1
-    final_time = 2.0
-    horizon = int(round(final_time / dt))
+    p = replace(_build_lqr_problem(), dt=dt)
+    nx, nu = p.nx, p.nu
 
-    A = np.array([[0.0, 1.0], [-0.25, -0.1]], dtype=float)
-    B = np.array([[0.0], [1.0]], dtype=float)
-    Q = np.diag([1.0, 0.2])
-    R = np.array([[0.05]], dtype=float)
-    Qf = np.diag([8.0, 1.0])
-    N = np.zeros((nx, nu), dtype=float)
-    x0 = np.array([1.5, 0.0], dtype=float)
-    u_lb = np.array([-0.75], dtype=float)
-    u_ub = np.array([0.75], dtype=float)
+    Ad, Bd = zero_order_hold_discretization(p.A, p.B, p.dt)
 
-    Ad, Bd = zero_order_hold_discretization(A, B, dt)
-
+    N_cross = np.zeros((nx, nu), dtype=float)
     G = np.zeros((0, nx + nu), dtype=float)
     H = np.zeros((0, nx + nu), dtype=float)
     g = np.zeros(0, dtype=float)
@@ -182,15 +171,15 @@ def build_trivial_lqr_problem(*, dt: float = 0.1):
     r = np.zeros(nu, dtype=float)
 
     running_model = crocoddyl.ActionModelLQR(nx, nu, False)
-    running_model.setLQR(Ad, Bd, Q, R, N, G, H, f, q, r, g, h)
-    running_model.u_lb = u_lb
-    running_model.u_ub = u_ub
+    running_model.setLQR(Ad, Bd, p.Q, p.R, N_cross, G, H, f, q, r, g, h)
+    running_model.u_lb = p.u_min.copy()
+    running_model.u_ub = p.u_max.copy()
 
     terminal_model = crocoddyl.ActionModelLQR(nx, 0, False)
     terminal_model.setLQR(
         np.eye(nx),
         np.zeros((nx, 0), dtype=float),
-        Qf,
+        p.Qf,
         np.zeros((0, 0), dtype=float),
         np.zeros((nx, 0), dtype=float),
         np.zeros((0, nx), dtype=float),
@@ -202,9 +191,9 @@ def build_trivial_lqr_problem(*, dt: float = 0.1):
         np.zeros(0, dtype=float),
     )
 
-    problem = crocoddyl.ShootingProblem(x0, [running_model] * horizon, terminal_model)
-    solver = crocoddyl.SolverBoxDDP(problem)
-    return solver, x0
+    shooting = crocoddyl.ShootingProblem(p.x0.copy(), [running_model] * p.horizon, terminal_model)
+    solver = crocoddyl.SolverBoxDDP(shooting)
+    return solver, p.x0
 
 
 def build_nonlinear_pendulum_solver(
