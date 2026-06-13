@@ -186,8 +186,12 @@ def solve_sqp(
     iterations = 0
     converged = False
     last_step_norm = float("inf")
+    last_constraint_norm = float("inf")
 
     for iteration in range(1, options.max_iterations + 1):
+        if last_step_norm <= options.step_tolerance and last_constraint_norm <= options.constraint_tolerance:
+            converged = True
+            break
         objective_grad = jax.grad(objective_fn)(z)
         constraint_residual = constraints_fn(z)
         constraint_jacobian = jax.jacfwd(constraints_fn)(z)
@@ -237,11 +241,7 @@ def solve_sqp(
             last_step_norm = float(jnp.sqrt(state_step_norm**2 + control_step_norm**2))
             z = candidate
 
-        updated_constraint_norm = float(jnp.linalg.norm(constraints_fn(z)))
-        if last_step_norm <= options.step_tolerance and updated_constraint_norm <= options.constraint_tolerance:
-            converged = True
-            iterations = iteration
-            break
+        last_constraint_norm = float(jnp.linalg.norm(constraints_fn(z)))
         iterations = iteration
 
     return z, iterations, converged, last_step_norm

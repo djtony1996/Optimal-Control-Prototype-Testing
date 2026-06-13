@@ -431,7 +431,7 @@ def ilqr_solve(
             cost_out = jnp.where(use_old, cost, next_cost)
             update_out = jnp.where(use_old, update_norm, next_update_norm)
             converged_out = jnp.logical_or(converged_flag, converged_now)
-            iteration_out = jnp.where(use_old, iteration_count, iteration_count + 1)
+            iteration_out = jnp.where(use_old | converged_now, iteration_count, iteration_count + 1)
             return controls_out, states_out, cost_out, update_out, converged_out, iteration_out
 
         initial_states, initial_cost = rollout_fn(controls0)
